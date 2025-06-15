@@ -1,42 +1,71 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using JetBrains.Annotations;
 using Lattice.Base;
+using Lattice.IR;
 using Unity.Assertions;
 using UnityEngine;
+using UnityEngine.Pool;
 
 // todo: implement qualifiers
 
 namespace Lattice.Nodes
 {
+    // References can either be rooted or relative:
+    //  - Rooted: Path descends from a top-level graph.
+    //  - Relative: Path descends from the graph this node is within.
     [Serializable]
     public abstract class CrossRefNode : LatticeNode
     {
+        // If null, this is a relative reference.
+        [CanBeNull]
         [SerializeField]
         protected LatticeGraph OtherGraph;
 
+        /// <summary>
+        /// A path of FileIds of each successive subgraph node in the node's path. The last node is the target node.
+        /// </summary>
         [SerializeField]
-        protected string OtherNode;
+        protected List<string> NodePath;
 
         [SerializeField]
         protected string OtherPort; // Must be non-null. "full value" of node is no longer a thing.
 
-        private LatticeNode resolved;
+        private CodePath? resolved;
 
-        public LatticeNode ResolvedNode
+        public CodePath? ResolvedNode
         {
             get
             {
-                if (resolved == null || resolved.FileId != OtherNode)
+                // Resolve the node if it's null or no longer points to the correct node.
+                if (resolved == null || NodePath.Count == 0 || resolved.Value.Last.FileId != NodePath.Last())
                 {
-                    if (OtherGraph == null)
+                    if (OtherGraph == null || NodePath.Count == 0)
                     {
+                        // Reference is not specified yet.
                         resolved = null;
                     }
                     else
                     {
-                        // I think this is unnecessary -- OnEnable() is called when accessing and loading this reference.
-                        // OtherGraph.Initialize();
-                        resolved = OtherGraph.nodes.Find(n => n.FileId == OtherNode) as LatticeNode;
+                        using var _ = (CollectionPool<List<LatticeNode>, LatticeNode>.Get(out var nodes));
+
+                        LatticeGraph graph = OtherGraph;
+                        foreach (var id in NodePath)
+                        {
+                            LatticeNode nextNode = graph.nodes.Find(n => n.FileId == id) as LatticeNode;
+                            if (nextNode == null)
+                            {
+                                // Cross reference failed to resolve.
+                                return null;
+                            }
+
+                            nodes.Add(nextNode);
+                            graph = nextNode.Graph;
+                        }
+
+                        resolved = new CodePath(OtherGraph, nodes);
                     }
                 }
 
@@ -46,17 +75,23 @@ namespace Lattice.Nodes
 
         public string GetResolvedPath()
         {
-            Assert.IsNotNull(ResolvedNode);
+            Assert.IsTrue(ResolvedNode.HasValue);
 
-            var path =
-                $"{ResolvedNode.Graph.name}.{ResolvedNode.Name}";
+            StringBuilder b = new(ResolvedNode.Value.Root.name);
 
-            if (!string.IsNullOrEmpty(OtherPort) && ResolvedNode.OutputPorts.Count > 1)
+            foreach (var n in ResolvedNode)
             {
-                path += "." + OtherPort;
+                b.Append('.');
+                b.Append(n.Name);
             }
 
-            return path;
+            if (!string.IsNullOrEmpty(OtherPort) && ResolvedNode.Value.Last.OutputPorts.Count > 1)
+            {
+                b.Append('.');
+                b.Append(OtherPort);
+            }
+
+            return b.ToString();
         }
 
         /// <summary>
@@ -65,14 +100,21 @@ namespace Lattice.Nodes
         /// </summary>
         public bool IsDisconnected()
         {
-            return ResolvedNode == null && (OtherGraph != null || !string.IsNullOrEmpty(OtherNode));
+            return ResolvedNode == null && (OtherGraph != null || NodePath.Any());
         }
 
-        public void SetTarget(BaseNode node, string port)
+        public void SetTarget(CodePath path, string port)
         {
-            OtherGraph = (LatticeGraph)node.Graph;
-            OtherNode = node.FileId;
+            OtherGraph = path.Root;
             OtherPort = port;
+            resolved = null;
+            
+            NodePath = new List<string>();
+            foreach (var n in path)
+            {
+                NodePath.Add(n.FileId);
+            }
+
             UpdateAllPorts();
         }
 

@@ -26,7 +26,9 @@ namespace Lattice.Editor.SearchProviders
         }
 
         public Action<Type> Callback;
+        
         public Func<Type, bool> Filter = _ => true;
+        public Type BaseType = typeof(BaseNode);
 
         /// <inheritdoc />
         public List<SearchTreeEntry> CreateSearchTree(SearchWindowContext context)
@@ -35,7 +37,7 @@ namespace Lattice.Editor.SearchProviders
             {
                 new SearchTreeGroupEntry(new GUIContent("Find C# Type")),
             };
-            foreach (var type in TypeCache.GetTypesDerivedFrom(typeof(BaseNode)))
+            foreach (var type in TypeCache.GetTypesDerivedFrom(BaseType))
             {
                 if (type != null && Filter(type))
                 {

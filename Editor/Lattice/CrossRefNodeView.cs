@@ -1,5 +1,6 @@
 ﻿using Lattice.Editor.Manipulators;
 using Lattice.Editor.SearchProviders;
+using Lattice.IR;
 using Lattice.Nodes;
 using UnityEditor;
 using UnityEngine.UIElements;
@@ -25,7 +26,8 @@ namespace Lattice.Editor.Views
                 search.Callback = port =>
                 {
                     CrossRefNode node = (CrossRefNode)NodeTarget;
-                    node.SetTarget(port.owner, port.portData.identifier);
+                    LatticeNode target = (LatticeNode)port.owner;
+                    node.SetTarget(target.ToRootPath(), port.portData.identifier);
                     UpdateText();
                 };
                 search.Show(selectNode);
@@ -37,7 +39,8 @@ namespace Lattice.Editor.Views
                 var resolvedNode = ((CrossRefNode)NodeTarget).ResolvedNode;
                 if (resolvedNode == null)
                     return;
-                LatticeGraphWindow.OpenWindow(resolvedNode);
+                
+                LatticeGraphWindow.OpenWindow(resolvedNode.Value.Last);
             });
             gotoNode.AddToClassList(GoToButtonUssClassName);
             gotoNode.AddManipulator(new GraphTooltipManipulator { Tooltip = "Go to..." });

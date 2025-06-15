@@ -16,6 +16,7 @@ using UnityEngine.Assertions;
 using UnityEngine.Pool;
 using UnityEngine.Serialization;
 using Exception = System.Exception;
+using Object = UnityEngine.Object;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -44,6 +45,11 @@ namespace Lattice.StandardLibrary
 
         [NonSerialized]
         private bool isInitialized;
+
+        [CanBeNull]
+        private Type stateType; 
+        
+        public override bool IsStatefulNode => stateType != null;
 
         /// <summary>
         ///     If this function returns a tuple (ie. multiple outputs), this list contains the names of each of the tuple
@@ -139,7 +145,7 @@ namespace Lattice.StandardLibrary
                 {
                     if (isThis)
                     {
-                        StateType = paramType;
+                        stateType = paramType;
                     }
                     else
                     {
@@ -165,7 +171,7 @@ namespace Lattice.StandardLibrary
                         }
                         else
                         {
-                            if (typeof(UnityEngine.Object).IsAssignableFrom(paramType))
+                            if (typeof(Object).IsAssignableFrom(paramType))
                             {
                                 // Unity Object references are always null by default.
                             }
@@ -258,7 +264,7 @@ namespace Lattice.StandardLibrary
             throw new LatticePortException($"No default stored for port [{port}]", port);
         }
 
-        public override void CompileToIR(GraphCompilation compilation)
+        public override void CompileToIR(IRGraph compilation)
         {
             InitializeReflection();
 
@@ -291,8 +297,7 @@ namespace Lattice.StandardLibrary
 
             IRNode primaryNode = AddFunctionNodes(compilation, method);
 
-            compilation.SetPrimaryNode(this, primaryNode);
-            
+            compilation.SetPrimaryNode(Path, primaryNode);
 
             // Create all of the output ports.
             // ============================
@@ -303,13 +308,14 @@ namespace Lattice.StandardLibrary
                 int fieldNum = 0;
                 foreach (var field in returnType.GetFields())
                 {
-                    compilation.AddFieldAccessor(this, primaryNode, field.Name, authoredOutputPort: tupleElementNames?[fieldNum++] ?? field.Name);
+                    compilation.AddFieldAccessor(Path, primaryNode, field.Name,
+                        tupleElementNames?[fieldNum++] ?? field.Name);
                 }
             }
             else if (returnType != typeof(void))
             {
                 // single value returned, just set the main node as primary output
-                compilation.Mappings[this].OutputPortMap["output"] = compilation.GetNodeRef(primaryNode);
+                compilation.MapOutputPort(Path, "output", primaryNode);
             }
 
             // no output if the return type is void.
@@ -320,7 +326,7 @@ namespace Lattice.StandardLibrary
         ///     functions, if needed. The resulting nodes are valid in the abstract lattice machine, ut not necessarily for direct
         ///     execution.
         /// </summary>
-        private IRNode AddFunctionNodes(GraphCompilation compilation, MethodInfo method)
+        private IRNode AddFunctionNodes(IRGraph compilation, MethodInfo method)
         {
             IRNode executionNode; // The node that accepts the input ports and does the actual execution.
             IRNode primaryValueNode; // The return value of the function.
@@ -329,7 +335,7 @@ namespace Lattice.StandardLibrary
             if (method.GetParameters().Any(p => p.ParameterType.IsByRef))
             {
                 // The primary execution node, that calls the user's function!
-                var mutationNode = compilation.AddNode(this, method.Name, new MutatorFunctionIRNode(method));
+                var mutationNode = compilation.AddNode(Path, method.Name, new MutatorFunctionIRNode(method));
                 executionNode = mutationNode;
 
                 // Add accessors for each of the mutation copies.
@@ -338,33 +344,40 @@ namespace Lattice.StandardLibrary
                 foreach (var p in method.GetParameters().Where(p => p.ParameterType.IsByRef))
                 {
                     // The output type is a tuple, where the references are the first N items.
-                    IRNode fieldNode = compilation.AddFieldAccessor(this, executionNode, "Item"+j, name: "RefCopy_" + p.Name);
+                    IRNode fieldNode =
+                        compilation.AddFieldAccessor(Path, executionNode, "Item" + j, name: "RefCopy_" + p.Name);
                     mutationAccessors.Add(fieldNode);
                     j++;
                 }
 
                 // We only currently use the copied value of the state ref.
-                Assert.IsTrue(method.GetParameters()[0].ParameterType.IsByRef); // We don't support mutating functions without state.
+                Assert.IsTrue(method.GetParameters()[0].ParameterType
+                                    .IsByRef); // We don't support mutating functions without state.
                 stateCopy = mutationAccessors[0];
-                
+
                 // Pull off a debugging node that stores the state every frame.
                 if (stateCopy != null)
                 {
-                    var stateDebugNode = compilation.AddNode(this,
+                    var stateDebugNode = compilation.AddNode(Path, "StateDebug",
                         CoreIRNodes.Identity(method.GetParameters()[0].ParameterType.GetElementType()));
                     stateDebugNode.AddInput("value", stateCopy);
-                    compilation.SetStateDebugNode(this, stateDebugNode);
+                    compilation.SetStateDebugNode(Path, stateDebugNode);
                 }
 
                 // The actual output *value* is the final element of the tuple:
-                primaryValueNode = compilation.AddFieldAccessor(this, executionNode, "Item"+(j),
+                primaryValueNode = compilation.AddFieldAccessor(Path, executionNode, "Item" + j,
                     name: "ReturnValue");
             }
             else
             {
                 // The primary execution node, that calls the user's function!
-                executionNode = compilation.AddNode(this, method.Name, new FunctionIRNode(method));
+                executionNode = compilation.AddNode(Path, method.Name, new FunctionIRNode(method));
                 primaryValueNode = executionNode;
+            }
+            
+            if (method.GetCustomAttribute<MainThreadAttribute>() != null)
+            {
+                executionNode.MustRunOnMainThread = true;
             }
 
             // Set node phase if it's marked with the attribute.
@@ -389,11 +402,11 @@ namespace Lattice.StandardLibrary
                 // If the function has state (ref this), pass the previous state in as a reference.
                 if (i == 0 && param.HasRefKeyword() && hasThis)
                 {
-                    var previousNode = compilation.AddNode(this, new PreviousIRNode( /* set below */ null));
+                    var previousNode = compilation.AddNode(Path, new PreviousIRNode( /* set below */ null));
 
                     // For now, all past state defaults to the default value for the type. But we should allow overriding this.
-                    var defaultNode = compilation.AddNode(this, "DefaultValue",
-                        FunctionIRNode.FromStaticMethod<ScriptNode>(nameof(GetDefaultValue), StateType));
+                    var defaultNode = compilation.AddNode(Path, "DefaultValue",
+                        FunctionIRNode.FromStaticMethod<ScriptNode>(nameof(GetDefaultValue), stateType));
                     defaultNode.CheckExceptions = false;
 
                     previousNode.AddInput(PreviousIRNode.DefaultValuePort, defaultNode);
@@ -418,8 +431,8 @@ namespace Lattice.StandardLibrary
                         Assert.IsFalse(param.ParameterType.IsByRef);
 
                         // Load the stored property and plug that into the input port.
-                        var portName = compilation.AddNode(this, new LiteralStringIRNode(param.Name));
-                        var defaultVal = compilation.AddNode(this, "PortDefault_" + param.Name,
+                        var portName = compilation.AddNode(Path, new LiteralStringIRNode(param.Name));
+                        var defaultVal = compilation.AddNode(Path, "PortDefault_" + param.Name,
                             FunctionIRNode.FromStaticMethod<ScriptNode>(nameof(GetPortDefault), param.ParameterType));
                         defaultVal.AddInput("port", portName);
                         executionNode.AddInput(param.Name, defaultVal);
@@ -435,8 +448,8 @@ namespace Lattice.StandardLibrary
                 i++;
             }
 
-            compilation.MapInputPorts(this, executionNode);
-            
+            compilation.MapInputPorts(Path, executionNode);
+
             return primaryValueNode;
         }
 
@@ -618,6 +631,10 @@ namespace Lattice.StandardLibrary
             OverrideMenuFolder = overrideMenuFolder;
         }
     }
+
+    /// <summary>Marks that a Lattice node always executes on the Main Thread. This is useful if it calls standard Unity APIs.</summary>
+    [AttributeUsage(AttributeTargets.Method)]
+    public class MainThreadAttribute : Attribute { }
 
     /// <summary>Exposes ScriptNodes to the CreateNode menu.</summary>
     public class ScriptNodeTemplate : INodeTemplate

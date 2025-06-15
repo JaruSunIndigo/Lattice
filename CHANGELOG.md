@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-06-14
+This update adds built-in, automatic parallelization Lattice nodes, levaraging the Unity job system. Scripts should run 2-8x faster, without any major changes to upgrade them (see [MainThread]).
+
+# Added
+ - Execution of scripts happens in parallel by default.
+ - New [MainThread] attribute to tell Lattice to always run a node on the Unity thread.
+ - Source for the compiler is now distributed with the package. (But the license terms are the same.)
+
+# Changes
+ - Improve the visualization of Lattice in the Unity profiler.
+ - Graphs can now be compiled in Debug or Release mode.
+ - Syntax errors no longer propagate downwards in the editor view.
+ - Type inference is more robust to malformed nodes.
+ - The Lattice editor is now more robust to broken/invalid scripts.
+ - Re-enable dead code elimination.
+ - Improve graph compilation speed by ~2-3x. 
+
+# Internals
+ - Refactored internal representation of code to support sub-graphs (not yet exposed to users)
+ - Many bugfixes and improved compilation soundness.
+ 
 ## [0.5.0] - 2024-10-29
 This update includes a whole slew of new UX improvements and the beginnings of some big compiler changes that will eventually allow for automatic-parallelization.
 
@@ -16,12 +37,13 @@ This update includes a whole slew of new UX improvements and the beginnings of s
 - Edges can be deleted with a 'knife' tool. 
 - Adds drag&drop from the project window for Lattice Scripts, onto GameObjects.
 - Adds a basic 'redirector' node.
+- Native Collections are now supported as inputs and outputs in Lattice Nodes.
 - Edges can now be created by dragging on port errors.
 - Updated icons to match Unity ECS style.
 - Automatically bake a LocalTransform component if a LatticeGraph requires it.
 
 ### New Nodes
-- Boolean 'Not' node
+- Boolean 'Not', 'Or', 'And' nodes
 - An 'Animated Transform' node that will bake the selected AnimationClip's root motion into a BlobAnimationClip and return it within Lattice.
 - 'SimpleAnimate' now has an optional 'OutputScale' parameter.
 - Many new basic math nodes!

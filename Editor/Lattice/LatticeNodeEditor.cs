@@ -31,7 +31,7 @@ namespace Lattice.Editor.Views
         public static bool IsPinned(string fileId) => SessionState.GetBool(GetPinnedStateKey(fileId), false);
         public static bool IsExpanded(string fileId) => SessionState.GetBool(GetExpandedStateKey(fileId), true);
 
-        public readonly LatticeNode Node;
+        public readonly CodePath Node;
         public readonly LatticeNodeView View;
 
         private readonly PropertyElement valuePropertyElement;
@@ -50,7 +50,7 @@ namespace Lattice.Editor.Views
             private set
             {
                 pinned = value;
-                SessionState.SetBool(GetPinnedStateKey(Node.FileId), value);
+                SessionState.SetBool(GetPinnedStateKey(Node.Last.FileId), value);
             }
         }
 
@@ -68,19 +68,19 @@ namespace Lattice.Editor.Views
             EntitiesResources.Templates.Inspector.ComponentHeader.Clone(this);
             foldout = this.Q<Foldout>(className: UssClasses.Inspector.Component.Header);
             foldout.contentContainer.AddToClassList(UssClasses.Inspector.Component.Container);
-            foldout.text = Node.Name;
+            foldout.text = Node.Last.Name;
             
             // Header context menu
             foldout.Q<Toggle>().AddManipulator(new ContextualMenuManipulator(evt =>
             {
-                if (Node is ScriptNode scriptNode)
+                if (Node.Last is ScriptNode scriptNode)
                 {
                     evt.menu.AppendAction("Edit Script", _ => SourceUtility.OpenAtMethod(scriptNode.Method.Resolve()));
                 }
             }));
 
-            pinned = IsPinned(Node.FileId);
-            foldout.value = IsExpanded(Node.FileId);
+            pinned = IsPinned(Node.Last.FileId);
+            foldout.value = IsExpanded(Node.Last.FileId);
 
             var label = foldout.Q<Label>(className: UssClasses.UIToolkit.Toggle.Text);
             label.name = "ComponentName";
@@ -103,7 +103,7 @@ namespace Lattice.Editor.Views
             }
             else
             {
-                switch (Node)
+                switch (Node.Last)
                 {
                     case ScriptNode:
                         icon.AddToClassList("script-node-icon");
@@ -193,20 +193,20 @@ namespace Lattice.Editor.Views
             foldout.RegisterValueChangedCallback(evt =>
             {
                 UpdateDebugValue(ExecutionHistory.MostRecent);
-                SessionState.SetBool(GetExpandedStateKey(Node.FileId), evt.newValue);
+                SessionState.SetBool(GetExpandedStateKey(Node.Last.FileId), evt.newValue);
             });
             RegisterCallback<AttachToPanelEvent, LatticeNodeEditor>(static (_, args) =>
             {
                 args.UpdateDebugValue(ExecutionHistory.MostRecent);
                 LatticeDebugUpdateSystem.OnLatticeExecute += args.UpdateDebugValue;
-                args.Node.OnPropertiesChanged += args.OnNodePropertiesChanged;
+                args.Node.Last.OnPropertiesChanged += args.OnNodePropertiesChanged;
             }, this);
 
             // Unsubscribe.
             RegisterCallback<DetachFromPanelEvent, LatticeNodeEditor>(static (_, args) =>
             {
                 LatticeDebugUpdateSystem.OnLatticeExecute -= args.UpdateDebugValue;
-                args.Node.OnPropertiesChanged -= args.OnNodePropertiesChanged;
+                args.Node.Last.OnPropertiesChanged -= args.OnNodePropertiesChanged;
             }, this);
 
             // When the inspector is resized we need to handle the label sizing.
@@ -254,7 +254,7 @@ namespace Lattice.Editor.Views
             // Returns true if propertyElement is used.
             UpdateType Update()
             {
-                if (execution == null || !execution.Graph.Mappings.ContainsKey(Node))
+                if (execution == null || !execution.Compilation.Graph.ContainsCodePath(Node))
                 {
                     propertyHelpBox.messageType = HelpBoxMessageType.Info;
                     propertyHelpBox.text = "Node was not in executed graph.";
@@ -266,12 +266,12 @@ namespace Lattice.Editor.Views
                 {
                     propertyHelpBox.messageType = HelpBoxMessageType.Info;
                     propertyHelpBox.text = "The graph was not compiled in debug mode.";
-                    propertyHelpBox.tooltip = $"Toggle {MenuItems.DisableDebugMenu} off.";
+                    propertyHelpBox.tooltip = $"Toggle {MenuItems.EnableDebugMenu} off.";
                     return UpdateType.HelpBox;
                 }
 
-                IRNode primaryNode = execution.Graph.Mappings[Node].PrimaryNode.Node;
-                if (!execution.Graph.MetadataDb.ContainsKey(primaryNode))
+                IRNode primaryNode = execution.Compilation.Graph.GetPrimaryNode(Node);
+                if (!execution.Compilation.MetadataDb.ContainsKey(primaryNode))
                 {
                     propertyHelpBox.messageType = HelpBoxMessageType.Info;
                     propertyHelpBox.text = "This node was not compiled.";
@@ -279,7 +279,7 @@ namespace Lattice.Editor.Views
                     return UpdateType.HelpBox;
                 }
 
-                if (!((LatticeGraphView)View.Owner).TryGetViewingEntity(execution.Graph, primaryNode, out Entity entity))
+                if (!((LatticeGraphView)View.Owner).TryGetViewingEntity(execution.Compilation, primaryNode, out Entity entity))
                 {
                     propertyHelpBox.messageType = HelpBoxMessageType.Info;
                     propertyHelpBox.text = "No entity selected in toolbar.";
@@ -287,7 +287,7 @@ namespace Lattice.Editor.Views
                     return UpdateType.HelpBox;
                 }
 
-                if (execution.DebugData.Values.TryGetValue(entity, primaryNode, out object value))
+                if (execution.DebugData.Values.TryGetValue((entity, primaryNode), out object value))
                 {
                     switch (value)
                     {
@@ -311,10 +311,10 @@ namespace Lattice.Editor.Views
                         valuePropertyElement[i].Q<Label>().text = GraphUtils.NicifyIdentifierName(View.OutputPortViews[j].Identifier);
                     }
 
-                    if (Node.StateType != null)
+                    if (Node.Last.IsStatefulNode)
                     {
-                        IRNode stateDebugNode = execution.Graph.Mappings[Node].StateDebugNode!.Node;
-                        if (execution.DebugData.Values.TryGetValue(entity, stateDebugNode, out object state))
+                        IRNode stateDebugNode = execution.Compilation.Graph.GetStateDebugNode(Node);
+                        if (execution.DebugData.Values.TryGetValue((entity, stateDebugNode), out object state))
                         {
                             SetTarget(statePropertyElement, state);
 

@@ -1,6 +1,7 @@
 ﻿using JetBrains.Annotations;
 using Lattice.Editor.Manipulators;
 using Lattice.Editor.Views;
+using UnityEditor.Experimental.GraphView;
 using UnityEngine.UIElements;
 
 namespace Lattice.Editor.Events
@@ -14,15 +15,32 @@ namespace Lattice.Editor.Events
         /// <summary>The tooltip shown.</summary>
         public string Tooltip { get; private set; }
 
+        /// <summary>Position the tooltip is shown relative to <see cref="Source"/>.</summary>
+        public GraphTooltipPosition Position { get; private set; } = GraphTooltipPosition.Top;
+
+        /// <summary>Optional tooltip to be displayed. If provided, <see cref="Tooltip"/> is unused.</summary>
+        [CanBeNull]
+        public GraphElement TooltipOverride { get; private set; }
+
         /// <summary>The element that set the tooltip. Null if no tooltip was found in the propagation path.</summary>
         [CanBeNull]
-        public VisualElement Element { get; private set; }
+        public VisualElement Source { get; private set; }
         
         /// <summary>Sets the tooltip and stops the event propagating.</summary>
-        public void SetTooltip(VisualElement element, string value)
+        public void SetTooltip(VisualElement source, [CanBeNull] string value, GraphTooltipPosition position = GraphTooltipPosition.Top)
         {
-            Element = element;
+            Source = source;
             Tooltip = value ?? "";
+            Position = position;
+            StopPropagation();
+        }
+        
+        /// <summary>Sets the tooltip and stops the event propagating.</summary>
+        public void SetTooltip(VisualElement source, GraphElement value, GraphTooltipPosition position = GraphTooltipPosition.Top)
+        {
+            Source = source;
+            TooltipOverride = value;
+            Position = position;
             StopPropagation();
         }
         
@@ -32,7 +50,9 @@ namespace Lattice.Editor.Events
             base.Init();
             bubbles = true;
             Tooltip = "";
-            Element = null;
+            TooltipOverride = null;
+            Position = GraphTooltipPosition.Top;
+            Source = null;
         }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using Lattice.Base;
+using Lattice.IR;
 using Lattice.StandardLibrary;
 using Unity.Entities;
 using UnityEngine;
@@ -20,6 +21,16 @@ namespace Lattice.StandardLibrary
         protected override IEnumerable<PortData> GenerateOutputPorts()
         {
             yield return new PortData("PrefabEntity");
+        }
+
+        /// <inheritdoc />
+        public override void CompileToIR(IRGraph compilation)
+        {
+            base.CompileToIR(compilation);
+            
+            // We need to set this here for now. We could set it in the base, but that would break other implementors
+            // because we aren't allowed to set primary node once it's set.
+            compilation.SetPrimaryNode(Path, compilation.GetNodesUnderPath(Path)[0]);
         }
 
         protected override Entity? BakeData(IBaker baker, LatticeExecutorAuthoring authoring)

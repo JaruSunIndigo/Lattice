@@ -30,3 +30,8 @@
 #input PropertyField {
     min-width: 75px;
 }
+
+.node-missing > #node-border {
+    background-color: rgba(255, 0, 0, 0.55);
+    border-color: rgba(255, 0, 0, .5);
+}

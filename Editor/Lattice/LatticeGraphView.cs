@@ -6,6 +6,7 @@ using System.Text;
 using Lattice.Base;
 using Lattice.Editor.Events;
 using Lattice.IR;
+using Lattice.Nodes;
 using Lattice.StandardLibrary;
 using Lattice.Utils;
 using Unity.Entities;
@@ -41,6 +42,7 @@ namespace Lattice.Editor.Views
 
         public LatticeGraphView(EditorWindow window) : base(window)
         {
+            
             AddToClassList(UssClassName);
 
             GridBackground gridBackground = new();
@@ -71,16 +73,17 @@ namespace Lattice.Editor.Views
         public override void LoadGraph(BaseGraph graph)
         {
             base.LoadGraph(graph);
-
+            
             // Update display with compiled metadata
-            GraphCompiler.AddToCompilation(Graph);
-            GraphCompilation compilation = GraphCompiler.RecompileIfNeeded();
+            GlobalGraph.LanguageServer.AddToCompilation(Graph);
+            GraphCompilation compilation = GlobalGraph.LanguageServer.RecompileIfNeeded();
             DisplayCompilation(compilation);
 
             // Access the most recent execution so we can display debug values.
             IRExecution execution = ExecutionHistory.MostRecent;
 
-            if (execution != null && !execution.Graph.SourceGraphs.Contains(Graph))
+            // todo: Swap this for reading the execution directly, somehow.
+            if (execution != null && !execution.Compilation.TopLevelGraphs.Contains(Graph))
             {
                 execution = null;
             }
@@ -91,12 +94,12 @@ namespace Lattice.Editor.Views
                 DisplayExecution(execution);
             }
 
-            GraphCompiler.OnGraphCompilation += OnCompilation;
+            GlobalGraph.LanguageServer.OnGraphCompilation += OnCompilation;
         }
 
         public override void UnloadGraph()
         {
-            GraphCompiler.OnGraphCompilation -= OnCompilation;
+            GlobalGraph.LanguageServer.OnGraphCompilation -= OnCompilation;
             base.UnloadGraph();
         }
 
@@ -124,7 +127,7 @@ namespace Lattice.Editor.Views
             if (obj.removedEdge != null || obj.addedEdge != null || obj.removedNode != null || obj.addedNode != null ||
                 obj.nodeChanged != null)
             {
-                GraphCompiler.RecompileIfNeeded(true);
+                GlobalGraph.LanguageServer.RecompileIfNeeded(force: true);
             }
         }
 
@@ -135,7 +138,7 @@ namespace Lattice.Editor.Views
 
         public void DisplayExecution(IRExecution context)
         {
-            if (!context.Graph.SourceGraphs.Contains(Graph) || context.DebugData == null)
+            if (!context.Compilation.TopLevelGraphs.Contains(Graph) || context.DebugData == null)
             {
                 return;
             }
@@ -174,16 +177,16 @@ namespace Lattice.Editor.Views
 
                 node.ClearMessageViewsFromNodeAndPorts();
 
-                node.UpdateCompilationInfo(context.Graph);
+                node.UpdateCompilationInfo(context.Compilation);
                 node.UpdateDebugValues(context);
 
-                var nodeTarget = node.Target;
-                if (context.Graph.Mappings.TryGetValue(nodeTarget, out var mapping))
+                // Show an error if any of the nodes mapped to this code path have an error value.
+                if (context.Compilation.Graph.ContainsCodePath(node.Target))
                 {
-                    foreach (IRNode irnode in mapping.Nodes)
+                    foreach (IRNode irnode in context.Compilation.Graph.GetNodesUnderPath(node.Target))
                     {
-                        if (TryGetViewingEntity(context.Graph, irnode, out Entity entity) &&
-                            context.DebugData.Values.TryGetValue(entity, irnode, out object val))
+                        if (TryGetViewingEntity(context.Compilation, irnode, out Entity entity) &&
+                            context.DebugData.Values.TryGetValue((entity, irnode), out object val))
                         {
                             if (val is Exception e)
                             {
@@ -222,7 +225,7 @@ namespace Lattice.Editor.Views
         /// <summary>Updates the visual display with information from the compiled form of the graph.</summary>
         public void DisplayCompilation(GraphCompilation compilation)
         {
-            if (!compilation.SourceGraphs.Contains(Graph))
+            if (!compilation.TopLevelGraphs.Contains(Graph))
             {
                 return;
             }
@@ -232,10 +235,10 @@ namespace Lattice.Editor.Views
             {
                 node.ClearMessageViewsFromNodeAndPorts();
 
-                if (!compilation.Mappings.ContainsKey(node.Target))
+                if (!compilation.Graph.ContainsCodePath(node.Target))
                 {
-                    Debug.LogError(!Graph.nodes.Contains(node.Target)
-                        ? $"Dangling NodeView without node in graph. [{node}]"
+                    Debug.LogError(!Graph.nodes.Contains(node.Target.Last)
+                        ? $"Dangling NodeView without node in graph. [{node}]" // I'm not sure this is the right error.
                         : $"Node was not converted to any IR Nodes. [{node.Target}]", Graph);
 
                     continue;
@@ -265,9 +268,9 @@ namespace Lattice.Editor.Views
                 }
 
                 StringBuilder b = new();
-                foreach ((Entity entity, IRNode irNode, object item3) in ex.DebugData.Values.OrderBy(x => x.Item2.ToString()))
+                foreach (((Entity entity, IRNode irNode), object item3) in ex.DebugData.Values.OrderBy(x => x.Key.Item2.ToString()))
                 {
-                    int idx = ex.Graph.NodeIndices[irNode];
+                    int idx = ex.Compilation.Graph.NodeIndices[irNode];
                     b.AppendLine($"[{idx}]{irNode}:{entity} -> \t{LatticeNodeView.ObjectToDebugString(item3)}");
                 }
 

@@ -61,18 +61,18 @@ namespace Lattice.StandardLibrary
             return relative;
         }
 
-        public override void CompileToIR(GraphCompilation compilation)
+        public override void CompileToIR(IRGraph compilation)
         {
             base.CompileToIR(compilation);
             
-            var bakedData = compilation.Mappings[this].Nodes[0];
+            var bakedData = compilation.GetNodesUnderPath(Path)[0];
 
-            var getChildLocation = compilation.AddNode(this, FunctionIRNode.FromStaticMethod<ChildWorldLocation>(nameof(GetChildLocation)));
+            var getChildLocation = compilation.AddNode(Path, FunctionIRNode.FromStaticMethod<ChildWorldLocation>(nameof(GetChildLocation)));
             getChildLocation.AddInput("offset", bakedData);
             getChildLocation.AddInput("entity", compilation.GetImplicitEntity(Graph));
-            compilation.MapInputPort(this, "RootTransform", getChildLocation, "rootTransform");
-            compilation.MapOutputPort(this, "WorldLocation", getChildLocation);
-            compilation.SetPrimaryNode(this, getChildLocation);
+            compilation.MapInputPort(Path, "RootTransform", getChildLocation, "rootTransform");
+            compilation.MapOutputPort(Path, "WorldLocation", getChildLocation);
+            compilation.SetPrimaryNode(Path, getChildLocation);
         }
 
         private static LocalTransform GetChildLocation(EntityManager em, Entity entity, LocalTransform? rootTransform, float4x4 offset)

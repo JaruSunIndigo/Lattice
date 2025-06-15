@@ -77,13 +77,23 @@ FakeNodeView {
 }
 
 /* FakeNodeView */
-FakeNodeView #title {
+.fake-node #title {
     /* Use tooltip background color */
     background-color: var(--fill-color);
 }
 
-FakeNodeView #node-border {
+.fake-node.fake-node--from-port #node-border {
     /* Use tooltip border styling */
     border-radius: 0;
     border-color: var(--outline-color);
+}
+
+.fake-node.fake-node--collapsedToTooltip > .node {
+    translate: 3px -50%;
+}
+
+.fake-node.fake-node--collapsedToTooltip > .node > #selection-border {
+    margin: -1px;
+    border-width: 1px;
+    border-color: rgba(68, 192, 255, 0.5);
 }

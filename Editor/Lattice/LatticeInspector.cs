@@ -44,7 +44,7 @@ namespace Lattice.Editor.Views
             foreach (
                 LatticeNodeView nodeView in
                 // Pinned editors:
-                graphView.NodeViews.Where(v => LatticeNodeEditor.IsPinned(v.Target.FileId))
+                graphView.NodeViews.Where(v => LatticeNodeEditor.IsPinned(v.Target.Last.FileId))
                          // Selection:
                          .Concat(graphView.selection.OfType<LatticeNodeView>())
                          // Sort by Y and then X position:

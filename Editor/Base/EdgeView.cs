@@ -15,6 +15,7 @@ namespace Lattice.Editor.Views
     {
         public const string UssClassName = "edge";
         public const string HiddenUssClassName = UssClassName + "--hidden";
+        public const string HiddenCompletelyUssClassName = UssClassName + "--hidden-completely";
         public const string VirtualUssClassName = UssClassName + "--virtual";
         public const string ForcedHoverUssClassName = UssClassName + "--forced-hover";
 
@@ -28,10 +29,11 @@ namespace Lattice.Editor.Views
 
         private Color virtualEdgeColor = Color.red;
         private bool isHidden;
+        private bool isHiddenCompletely;
         private bool isVirtual;
         private EdgeControlWithHiddenEdges edgeControlComplex;
 
-        /// <summary>Whether the edge is tunnelled across the graph. If hidden, only the ends of the edge are visible by default.</summary>
+        /// <summary>Whether the edge is tunnelled across the graph. If hidden, only arrows draw between the ports.</summary>
         public bool IsHidden
         {
             get => isHidden;
@@ -49,6 +51,22 @@ namespace Lattice.Editor.Views
 
                 isHidden = value;
                 EnableInClassList(HiddenUssClassName, isHidden);
+            }
+        }
+        
+        /// <summary>Hides the edge from display and selection completely.</summary>
+        public bool IsHiddenCompletely
+        {
+            get => isHiddenCompletely;
+            set
+            {
+                if (isHiddenCompletely == value)
+                {
+                    return;
+                }
+
+                isHiddenCompletely = value;
+                EnableInClassList(HiddenCompletelyUssClassName, isHiddenCompletely);
             }
         }
 
@@ -111,7 +129,8 @@ namespace Lattice.Editor.Views
                 edgeControlComplex.EdgeStyle = edgeState switch
                 {
                     "dashed" => EdgeControlWithHiddenEdges.RenderStyle.Dashed,
-                    "hidden" => EdgeControlWithHiddenEdges.RenderStyle.Hidden,
+                    "hidden" => EdgeControlWithHiddenEdges.RenderStyle.HiddenWithPortArrows,
+                    "hidden-completely" => EdgeControlWithHiddenEdges.RenderStyle.HiddenCompletely,
                     _ => EdgeControlWithHiddenEdges.RenderStyle.Visible
                 };
             }

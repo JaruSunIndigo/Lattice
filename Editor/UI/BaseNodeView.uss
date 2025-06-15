@@ -276,3 +276,42 @@
 .node.node--nullable-lifted .node__nullable-indicator {
     display: flex;
 }
+
+/* Collapsed To (not .collapsing via foldout). */
+.node.node--collapsed-to {
+    max-width: 28px;
+    width: 28px;
+    height: 22px;
+    max-height: 22px;
+    --min-height: 0;
+    padding: 0;
+}
+
+.node.node--collapsed-to > #node-border {
+    align-self: center;
+    width: 26px;
+    height: 20px;
+    background-color: rgba(63, 63, 63, 0.8);
+    background-image: url("/Packages/com.pontoco.lattice/Editor/Images/AddThick.png");
+    -unity-background-image-tint-color: rgb(100, 100, 100);
+    -unity-background-scale-mode: scale-to-fit;
+    background-size: 8px 8px;
+}
+
+.node.node--collapsed-to:hover > #node-border {
+    -unity-background-image-tint-color: rgb(200, 200, 200);
+}
+
+.node.node--collapsed-to PortView > #connector {
+    margin: 0;
+}
+
+.node.node--collapsed-to > #selection-border {
+    margin: -1px;
+}
+
+.node.node--collapsed-to > #node-border > *,
+.node.node--collapsed-to-input > #BottomPortsAll,
+.node.node--collapsed-to-output > #TopPortsAll {
+    display: none;
+}

@@ -43,6 +43,7 @@ namespace Lattice.StandardLibrary
         protected override BlobAssetReference<BlobTransformClip>? BakeData(
             IBaker baker, LatticeExecutorAuthoring authoring)
         {
+#if UNITY_EDITOR
             if (Clip == null)
             {
                 Debug.LogWarning($"No animation clip provided. [{this}]");
@@ -101,20 +102,24 @@ namespace Lattice.StandardLibrary
             var blobRef = builder.CreateBlobAssetReference<BlobTransformClip>(Allocator.Persistent);
             baker.AddBlobAsset(ref blobRef, out var hash);
             return blobRef;
+#else
+            throw new Exception("Cannot call baker at runtime.");
+#endif
         }
 
         /// <inheritdoc />
-        public override void CompileToIR(GraphCompilation compilation)
+        public override void CompileToIR(IRGraph compilation)
         {
             base.CompileToIR(compilation);
+            
 
-            var blobRef = compilation.GetPrimaryNode(this);
-            var evaluateNode = compilation.AddNode(this,
+            var blobRef = compilation.GetPrimaryNode(Path);
+            var evaluateNode = compilation.AddNode(Path,
                 FunctionIRNode.FromStaticMethod<AnimatedTransform>(nameof(EvaluateClip)));
             evaluateNode.AddInput("clip", blobRef);
-            compilation.MapInputPort(this, "time", evaluateNode, "time");
-            compilation.SetPrimaryNode(this, evaluateNode);
-            compilation.MapOutputPort(this, "rigidTransform", evaluateNode);
+            compilation.MapInputPort(Path, "time", evaluateNode, "time");
+            compilation.SetPrimaryNode(Path, evaluateNode);
+            compilation.MapOutputPort(Path, "rigidTransform", evaluateNode);
 
             if (GetPort("time").GetEdges().Count == 0)
             {
@@ -122,7 +127,7 @@ namespace Lattice.StandardLibrary
                     typeof(CoreIRNodes).GetMethod(nameof(CoreIRNodes.DefaultValue),
                                            BindingFlags.Public | BindingFlags.Static)!
                                        .MakeGenericMethod(typeof(float)));
-                compilation.AddNode(this, defaultTime);
+                compilation.AddNode(Path, defaultTime);
                 evaluateNode.AddInput("time", defaultTime);
             }
         }
@@ -131,7 +136,7 @@ namespace Lattice.StandardLibrary
         public static RigidTransform EvaluateClip(BlobAssetReference<BlobTransformClip> clip, float time)
         {
             ref BlobTransformClip c = ref clip.Value;
-            
+
             var pos = new float3(
                 c.PositionX.IsEmpty() ? 0 : c.PositionX.Evaluate(time),
                 c.PositionY.IsEmpty() ? 0 : c.PositionY.Evaluate(time),

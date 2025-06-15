@@ -35,16 +35,16 @@ namespace Lattice.StandardLibrary
             };
         }
 
-        public override void CompileToIR(GraphCompilation compilation)
+        public override void CompileToIR(IRGraph compilation)
         {
-            IRNode collect = compilation.AddNode(this, new CollectIRNode<bool>());
-            compilation.MapInputPort(this, PortBooleans, collect, CollectIRNode.PortInputs);
+            IRNode collect = compilation.AddNode(Path, new CollectIRNode<bool>());
+            compilation.MapInputPort(Path, PortBooleans, collect, CollectIRNode.PortInputs);
 
-            IRNode and = compilation.AddNode(this, FunctionIRNode.Create<NativeArray<bool>, bool>(And));
+            IRNode and = compilation.AddNode(Path, FunctionIRNode.Create<NativeArray<bool>, bool>(And));
             and.AddInput("booleans", collect);
             
-            compilation.SetPrimaryNode(this, and);
-            compilation.MapOutputPort(this, PortResult, and);
+            compilation.SetPrimaryNode(Path, and);
+            compilation.MapOutputPort(Path, PortResult, and);
         }
 
         // "and" all of the inputs together

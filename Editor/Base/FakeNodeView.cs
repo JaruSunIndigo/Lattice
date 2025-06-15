@@ -1,5 +1,4 @@
 ﻿using System;
-using Lattice.Editor.Events;
 using UnityEditor;
 using UnityEditor.Experimental.GraphView;
 using UnityEngine;
@@ -13,7 +12,10 @@ namespace Lattice.Editor.Views
 	///     that's outside the current view.
 	/// </summary>
 	internal sealed class FakeNodeView : GraphElement
-	{
+    {
+        public const string UssClassName = "fake-node";
+        public const string FromPortUssClassName = UssClassName + "--from-port";
+        
 		private readonly VisualElement root;
 
 		/// <summary>The original port used to create this view.</summary>
@@ -22,14 +24,33 @@ namespace Lattice.Editor.Views
 		/// <summary>The port created under this view if you used the <see cref="FakeNodeView(PortView)"/> constructor.</summary>
 		private readonly PortView port;
 
-		/// <summary>Create a <see cref="FakeNodeView" /> that looks like the input <paramref name="node" />, but lacking any ports.</summary>
+        private readonly BaseNodeView originNode;
+        private readonly VisualElement titleContainer;
+        private readonly Label titleLabel;
+        private readonly Label subtitleLabel;
+
+        public void Update()
+        {
+            VisualElement nodeTitleContainer = originNode.Q(BaseNodeView.TitleContainerName);
+            Label nodeSubtitle = nodeTitleContainer.Q<Label>(BaseNodeView.SubtitleLabelName);
+            titleLabel.text = originNode.title;
+            subtitleLabel.text = nodeSubtitle.text;
+            DisplayStyle subtitleDisplay = nodeSubtitle.resolvedStyle.display;
+            subtitleLabel.style.display = subtitleDisplay;
+            titleContainer.Q(null, BaseNodeView.TitleNameContainerUssClassName)
+                          .EnableInClassList(BaseNodeView.TitleNameContainerHasCustomNameUssClassName, subtitleDisplay == DisplayStyle.Flex);
+        }
+
+        /// <summary>Create a <see cref="FakeNodeView" /> that looks like the input <paramref name="node" />, but lacking any ports.</summary>
 		public FakeNodeView(BaseNodeView node)
 		{
-			layer = 101;
+            originNode = node;
+            layer = 101;
 			pickingMode = PickingMode.Ignore;
 			style.position = Position.Absolute;
 			// Remove the annoying padding and margin added to all GraphElements.
 			RemoveFromClassList("graphElement");
+            AddToClassList(UssClassName);
 
 			root = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>("Packages/com.pontoco.lattice/Editor/UI/FakeNodeView.uxml").Instantiate()[0];
             styleSheets.Add(AssetDatabase.LoadAssetAtPath<StyleSheet>("Packages/com.pontoco.lattice/Editor/UI/TooltipView.uss"));
@@ -38,7 +59,6 @@ namespace Lattice.Editor.Views
 			// Get details from node.
 			VisualElementStyleSheetSet nodeStyleSheets = node.styleSheets;
 			VisualElement nodeTitleContainer = node.Q(BaseNodeView.TitleContainerName);
-			Label nodeSubtitle = nodeTitleContainer.Q<Label>(BaseNodeView.SubtitleLabelName);
 			VisualElement nodeTitleIcon = nodeTitleContainer.Q(BaseNodeView.TitleIconName);
 
 			// Set up:
@@ -49,15 +69,9 @@ namespace Lattice.Editor.Views
 			}
 
 			// Title and subtitle
-			VisualElement titleContainer = root.Q(BaseNodeView.TitleContainerName);
-			Label title = titleContainer.Q<Label>(BaseNodeView.TitleLabelName);
-			Label subtitle = titleContainer.Q<Label>(BaseNodeView.SubtitleLabelName);
-			title.text = node.title;
-			subtitle.text = nodeSubtitle.text;
-            DisplayStyle subtitleDisplay = nodeSubtitle.resolvedStyle.display;
-            subtitle.style.display = subtitleDisplay;
-            titleContainer.Q(null, BaseNodeView.TitleNameContainerUssClassName)
-                          .EnableInClassList(BaseNodeView.TitleNameContainerHasCustomNameUssClassName, subtitleDisplay == DisplayStyle.Flex);
+			titleContainer = root.Q(BaseNodeView.TitleContainerName);
+            titleLabel = titleContainer.Q<Label>(BaseNodeView.TitleLabelName);
+            subtitleLabel = titleContainer.Q<Label>(BaseNodeView.SubtitleLabelName);
             
 
 			// Icon
@@ -76,7 +90,9 @@ namespace Lattice.Editor.Views
 			}
 
 			root.Q("node-border").style.overflow = Overflow.Hidden;
-		}
+
+            Update();
+        }
 
 		/// <summary>
 		///     Create a <see cref="FakeNodeView" /> that looks like the node associated with the input
@@ -84,6 +100,8 @@ namespace Lattice.Editor.Views
 		/// </summary>
 		public FakeNodeView(PortView originPort) : this(originPort.Owner)
 		{
+            AddToClassList(FromPortUssClassName);
+            
 			this.originPort = originPort;
 			port = PortView.CreatePortView(null, originPort.direction, originPort.PortData, null);
 			port.pickingMode = PickingMode.Ignore;
@@ -103,7 +121,9 @@ namespace Lattice.Editor.Views
 			container.Add(port);
 		}
 
-		/// <summary>Position this element on screen, positioned on the line between the port this was created from and <paramref cref="connectedPort"/>.</summary>
+        public string CustomName { get; set; }
+
+        /// <summary>Position this element on screen, positioned on the line between the port this was created from and <paramref cref="connectedPort"/>.</summary>
 		public void PositionOnScreenAlignedTowardsPort(PortView connectedPort, bool showTooltip)
 		{
 			Assert.IsNotNull(originPort, "Cannot align towards connected port if this view was not created with a port.");

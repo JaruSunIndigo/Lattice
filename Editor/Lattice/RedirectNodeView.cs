@@ -72,6 +72,9 @@ namespace Lattice.Editor.Views
         }
 
         /// <inheritdoc />
+        protected override bool CanCollapseTo() => false;
+
+        /// <inheritdoc />
         public override PortView AddPort(Direction direction, EdgeConnectorListener listener, PortData portData)
         {
             var port = base.AddPort(direction, listener, portData);

@@ -21,6 +21,11 @@
     --curve-style: straight;
 }
 
+.edge--hidden-completely {
+    --edge-style: hidden-completely;
+    --curve-style: straight;
+}
+
 .edge:hover.edge--hidden,
 .edge--forced-hover.edge--hidden {
     --edge-style: dashed;

@@ -13,12 +13,12 @@ namespace Lattice.Editor.Views
     {
         /// <summary>The text shown on the tooltip. Similar to <see cref="VisualElement.tooltip" />.</summary>
         public string Tooltip { get; }
+
+        /// <summary>The position the tooltip will be displayed relative to this element.</summary>
+        GraphTooltipPosition Position { get; }
         
         /// <summary>Create an instance of the view and add any required styles or modifications.</summary>
         public GraphTooltipView CreateTooltipView();
-        
-        /// <summary>Position <see cref="tooltipElement"/> based on this element.</summary>
-        public void PositionTooltip(GraphTooltipView tooltipElement);
     }
 
     /// <summary>The reason that caused a <see cref="GraphTooltipView"/> to be shown.</summary>
@@ -29,19 +29,20 @@ namespace Lattice.Editor.Views
         ForceShow,
         RedirectNode
     }
+    
+    /// <summary>The side of the target that a tooltip is anchored to.</summary>
+    public enum GraphTooltipPosition
+    {
+        Top,
+        Bottom,
+        Left,
+        Right
+    }
 
     /// <summary>The default view implementation for tooltips, which just sets the text of the label.</summary>
     internal class GraphTooltipView : GraphElement
     {
         /// <summary>The position of the tooltip. E.g. if Top is used, the tooltip should appear above the source element.</summary>
-        public enum Position
-        {
-            Top,
-            Bottom,
-            Left,
-            Right
-        }
-        
         public const string UssClassName = "tooltip-view";
         public const string ContainerUssClassName = "tooltip-view__container";
         public const string LabelUssClassName = UssClassName + "__label";
@@ -224,26 +225,32 @@ namespace Lattice.Editor.Views
         }
 
         /// <summary>Default behaviour for positioning the tooltip view.</summary>
-        public void SetPosition(VisualElement owner, Position position = Position.Top)
+        public void SetPosition(VisualElement owner, GraphTooltipPosition position)
+        {
+            SetPosition(owner, this, position);
+        }
+
+        /// <summary>Default behaviour for positioning the tooltip view.</summary>
+        public static void SetPosition(VisualElement owner, VisualElement element, GraphTooltipPosition position)
         {
             // Position the tooltip based on the port location.
-            IStyle tooltipStyle = style;
+            IStyle tooltipStyle = element.style;
             Rect rect = owner.contentRect;
             float x = position switch
             {
-                Position.Top or Position.Bottom => rect.center.x,
-                Position.Right => rect.max.x,
+                GraphTooltipPosition.Top or GraphTooltipPosition.Bottom => rect.center.x,
+                GraphTooltipPosition.Right => rect.max.x,
                 _ => rect.min.x
             };
             
             float y = position switch
             {
-                Position.Left or Position.Right => rect.center.y,
-                Position.Bottom => rect.max.y,
+                GraphTooltipPosition.Left or GraphTooltipPosition.Right => rect.center.y,
+                GraphTooltipPosition.Bottom => rect.max.y,
                 _ => rect.min.y
             };
             
-            Vector2 p = owner.ChangeCoordinatesTo(parent, new Vector2(x, y));
+            Vector2 p = owner.ChangeCoordinatesTo(element.parent, new Vector2(x, y));
             tooltipStyle.left = p.x;
             tooltipStyle.top = p.y;
         }

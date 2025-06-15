@@ -20,10 +20,10 @@ namespace Lattice.Editor.Views
         {
             /// <summary>A completely visible edge, rendered normally.</summary>
             Visible,
-
+            /// <summary>No edge is rendered. Arrows are drawn between connected ports.</summary>
+            HiddenWithPortArrows,
             /// <summary>No edge is rendered.</summary>
-            Hidden,
-
+            HiddenCompletely,
             /// <summary>Renders a completely visible edge using a dashed line.</summary>
             Dashed
         }
@@ -32,7 +32,6 @@ namespace Lattice.Editor.Views
         {
             /// <summary>The default GraphView style.</summary>
             Default,
-
             /// <summary>A straight line.</summary>
             Straight
         }
@@ -190,7 +189,7 @@ namespace Lattice.Editor.Views
             Painter2D painter2D = mgc.painter2D;
             
             // Draw arrows at the port if the edge is hidden.
-            if (edgeStyle == RenderStyle.Hidden)
+            if (edgeStyle is RenderStyle.HiddenWithPortArrows)
             {
                 const int divisions = 10;
                 const float arrowAngle = Mathf.PI * 0.15f;
@@ -259,7 +258,8 @@ namespace Lattice.Editor.Views
                     }
                     break;
                 }
-                case RenderStyle.Hidden:
+                case RenderStyle.HiddenWithPortArrows:
+                case RenderStyle.HiddenCompletely:
                 {
                     // Render nothing. The edge is hidden.
                     return;
@@ -284,7 +284,8 @@ namespace Lattice.Editor.Views
         {
             switch (edgeStyle)
             {
-                case RenderStyle.Hidden:
+                case RenderStyle.HiddenWithPortArrows:
+                case RenderStyle.HiddenCompletely:
                     // Edge is hidden, it's unselectable.
                     return false;
                 case RenderStyle.Visible:
@@ -300,7 +301,8 @@ namespace Lattice.Editor.Views
         {
             switch (edgeStyle)
             {
-                case RenderStyle.Hidden:
+                case RenderStyle.HiddenWithPortArrows:
+                case RenderStyle.HiddenCompletely:
                     // Edge is hidden, it's unselectable.
                     return false;
                 case RenderStyle.Visible:

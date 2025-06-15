@@ -19,9 +19,9 @@ namespace Lattice.StandardLibrary
             yield return new PortData("Output");
         }
 
-        public override void CompileToIR(GraphCompilation compilation)
+        public override void CompileToIR(IRGraph compilation)
         {
-            compilation.AddNode(this, FunctionIRNode.FromStaticMethod<LiteralNode<T>>(nameof(ReturnLiteral)));
+            compilation.AddNode(Path, FunctionIRNode.FromStaticMethod<LiteralNode<T>>(nameof(ReturnLiteral)));
         }
 
         private static T ReturnLiteral(LatticeNode node)

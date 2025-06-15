@@ -5,7 +5,6 @@ using System.Reflection;
 using JetBrains.Annotations;
 using Lattice.Editor.Events;
 using Lattice.Editor.Manipulators;
-using Lattice.Nodes;
 using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 using UnityEngine.UIElements;
@@ -40,11 +39,18 @@ namespace Lattice.Editor.Views
             {
                 public string Tooltip { get; private set; } = "";
                 
+                public GraphTooltipPosition Position { get; private set; }
+
+                [CanBeNull]
+                public GraphElement TooltipElementOverride { get; private set; }
+
                 public VisualElement Element { get; private set; }
                 
                 public void Update(TooltipProvider other)
                 {
                     Tooltip = other.Tooltip;
+                    TooltipElementOverride = other.TooltipElementOverride;
+                    Position = other.Position;
                     Element = other.Element;
                 }
 
@@ -52,6 +58,8 @@ namespace Lattice.Editor.Views
                 {
                     Element = target;
                     Tooltip = target?.Tooltip ?? "";
+                    TooltipElementOverride = null;
+                    Position = target?.Position ?? GraphTooltipPosition.Top;
                 }
 
                 public void Update(VisualElement target)
@@ -75,8 +83,10 @@ namespace Lattice.Editor.Views
                         using GraphTooltipEvent evt = GraphTooltipEvent.GetPooled();
                         evt.target = target;
                         SendEventImmediatelyMethod.Invoke(target, new object[] { evt, 2 });
-                        Element = evt.Element;
+                        Element = evt.Source;
                         Tooltip = evt.Tooltip;
+                        TooltipElementOverride = evt.TooltipOverride;
+                        Position = evt.Position;
                         return;
                     }
 
@@ -87,6 +97,8 @@ namespace Lattice.Editor.Views
 
                     Element = (VisualElement)newGraphTooltipElement;
                     Tooltip = newGraphTooltipElement.Tooltip;
+                    TooltipElementOverride = null;
+                    Position = newGraphTooltipElement.Position;
                 }
 
                 /// <inheritdoc />
@@ -227,6 +239,12 @@ namespace Lattice.Editor.Views
 
             private void HideSingleTooltip(TooltipProvider tooltipProvider, bool forceHide)
             {
+                if (tooltipProvider.TooltipElementOverride != null)
+                {
+                    graphView.RemoveElement(tooltipProvider.TooltipElementOverride);
+                    return;
+                }
+                
                 if (tooltipProvider.Element == null || !tooltips.TryGetValue(tooltipProvider.Element, out GraphTooltipView view))
                 {
                     return;
@@ -243,29 +261,20 @@ namespace Lattice.Editor.Views
                     return;
                 }
 
-                GraphTooltipView tooltipElement;
-                if (tooltipProvider.Element is IHasGraphTooltip customTooltipProvider)
+                if (tooltipProvider.TooltipElementOverride != null)
                 {
-                    // Provider creates a modified tooltip, use its custom logic.
-                    if (!tooltips.TryGetValue(source, out tooltipElement))
-                    {
-                        tooltips.Add(source, tooltipElement = customTooltipProvider.CreateTooltipView());
-                        graphView.AddElement(tooltipElement);
-                        source.RegisterCallbackOnce<DetachFromPanelEvent>(OnProviderDetachFromPanel);
-                    }
-                    else
-                    {
-                        tooltipElement.visible = true;
-                    }
-                    tooltipElement.UpdateTooltip(evtSource);
-                    customTooltipProvider.PositionTooltip(tooltipElement);
+                    GraphElement tooltip = tooltipProvider.TooltipElementOverride;
+                    graphView.AddElement(tooltip);
+                    GraphTooltipView.SetPosition(tooltipProvider.Element, tooltip, tooltipProvider.Position);
                 }
                 else
                 {
-                    // Provider is default, use the basic logic.
-                    if (!tooltips.TryGetValue(source, out tooltipElement))
+                    if (!tooltips.TryGetValue(source, out GraphTooltipView tooltipElement))
                     {
-                        tooltips.Add(source, tooltipElement = new GraphTooltipView(tooltipProvider.Tooltip));
+                        tooltips.Add(source, tooltipElement =
+                            tooltipProvider.Element is IHasGraphTooltip customTooltipProvider
+                                ? customTooltipProvider.CreateTooltipView() 
+                                : new GraphTooltipView(tooltipProvider.Tooltip));
                         graphView.AddElement(tooltipElement);
                         source.RegisterCallbackOnce<DetachFromPanelEvent>(OnProviderDetachFromPanel);
                     }
@@ -275,9 +284,7 @@ namespace Lattice.Editor.Views
                     }
 
                     tooltipElement.UpdateTooltip(evtSource);
-
-                    // Position the tooltip based on the location of the owner.
-                    tooltipElement.SetPosition(tooltipProvider.Element);
+                    tooltipElement.SetPosition(tooltipProvider.Element, tooltipProvider.Position);
                 }
             }
 

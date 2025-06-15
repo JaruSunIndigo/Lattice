@@ -1,13 +1,36 @@
 ﻿using System;
 using System.Collections.Generic;
+using Lattice.Base;
 using UnityEditor.Experimental.GraphView;
 using UnityEngine;
 using UnityEngine.UIElements;
 
 namespace Lattice.Editor.Views
 {
-    public sealed partial class PortView
+    using PortDirection = Direction;
+
+    public sealed partial class PortView : IHasGraphTooltip
     {
+        /// <inheritdoc />
+        GraphTooltipPosition IHasGraphTooltip.Position =>
+            Location switch
+            {
+                PortViewLocation.Top => GraphTooltipPosition.Top,
+                PortViewLocation.Bottom or PortViewLocation.BottomLeft => GraphTooltipPosition.Bottom,
+                PortViewLocation.Left or PortViewLocation.State => GraphTooltipPosition.Left,
+                PortViewLocation.Right => GraphTooltipPosition.Right,
+                _ => throw new ArgumentOutOfRangeException()
+            };
+        
+        /// <inheritdoc />
+        GraphTooltipView IHasGraphTooltip.CreateTooltipView()
+        {
+            var tooltipView = new PortTooltipView(this);
+            // Add a USS class based on the port location.
+            tooltipView.AddToClassList($"{GraphTooltipView.UssClassName}--{Location.ToString().ToLowerInvariant()}");
+            return tooltipView;
+        }
+
         /// <summary>A specific implementation of tooltips for <see cref="PortView"/>. Supports complex tooltips on connected edges.</summary>
         private sealed class PortTooltipView : GraphTooltipView
         {
@@ -126,17 +149,28 @@ namespace Lattice.Editor.Views
                 {
                     bool isEdgeHidden = edge.SerializedEdge?.IsHidden ?? false;
                     PortView connected = (PortView)(edge.input == query ? edge.output : edge.input);
-                    if (connected.Owner is RedirectNodeView)
+
+                    switch (connected.Owner)
                     {
-                        // Get ports from all the way down redirect nodes.
-                        PortView other = query.direction == UnityEditor.Experimental.GraphView.Direction.Input ?
-                            connected.Owner.InputPortViews[0] :
-                            connected.Owner.OutputPortViews[0];
-                        InvokeOnConnectedPorts(other, callback);
-                    }
-                    else
-                    {
-                        callback(connected, isEdgeHidden);
+                        case { } node when node.NodeTarget.CollapsedToState ==
+                                           (query.direction == PortDirection.Input
+                                               ? NodeCollapseToDirection.ToInput
+                                               : NodeCollapseToDirection.ToOutput
+                                           ):
+                            // Ignore nodes that are marked as collapsed in this direction (as their ports are hidden).
+                            continue;
+                        case RedirectNodeView:
+                        {
+                            // Get ports from all the way down redirect nodes.
+                            PortView other = query.direction == PortDirection.Input ?
+                                connected.Owner.InputPortViews[0] :
+                                connected.Owner.OutputPortViews[0];
+                            InvokeOnConnectedPorts(other, callback);
+                            break;
+                        }
+                        default:
+                            callback(connected, isEdgeHidden);
+                            break;
                     }
                 }
             }

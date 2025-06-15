@@ -6,7 +6,9 @@ using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using GrEmit;
+using Lattice.Editor.Tools;
 using Lattice.IR;
+using Lattice.Utils;
 using Unity.Entities;
 using UnityEditor;
 using UnityEngine;
@@ -66,7 +68,7 @@ namespace Lattice.Editor.Views
                 // Render graphviz just for this graph.
                 GraphCompilation compilation = GraphCompiler.CompileStandalone(graphView.Graph);
                 string dotString = GraphCompilation.ToDot(compilation);
-                OpenGraphviz(dotString);
+                GraphUtils.OpenGraphviz(dotString);
             }, left: false);
 
             AddButton("Select In Project", () => EditorGUIUtility.PingObject(graphView.Graph), false);
@@ -77,7 +79,7 @@ namespace Lattice.Editor.Views
             AddCustom(() =>
             {
                 IRExecution execution = ExecutionHistory.MostRecent;
-                if (execution == null || !execution.Graph.SourceGraphs.Contains(graphView.Graph))
+                if (execution == null || !execution.Compilation.TopLevelGraphs.Contains(graphView.Graph))
                 {
                     GUI.enabled = false;
                     EditorGUILayout.DropdownButton(new GUIContent("Not Executed"),
@@ -162,33 +164,6 @@ namespace Lattice.Editor.Views
             //         menu.ShowAsContext();
             //     }
             // });
-        }
-
-        public static void OpenGraphviz(string dot)
-        {
-            string encodedDotString = UnityWebRequest.EscapeURL(dot).Replace("+", "%20");
-            string url = $"https://dreampuf.github.io/GraphvizOnline/#{encodedDotString}";
-            
-            // Create temporary HTML file. The url generated here is too big to fit in a Win32 command line argument,
-            // so we have to save it into a temp file and use a redirector to get the browser to load the page. 
-            string tempHtmlPath = FileUtil.GetUniqueTempPathInProject() + "redirect.html";
-
-            using (StreamWriter writer = new(tempHtmlPath))
-            {
-                writer.WriteLine("<!DOCTYPE html>");
-                writer.WriteLine("<html>");
-                writer.WriteLine("<head>");
-                writer.WriteLine($"<meta http-equiv=\"refresh\" content=\"0; url={url}\" />");
-                writer.WriteLine("<title>Redirecting...</title>");
-                writer.WriteLine("</head>");
-                writer.WriteLine("<body>");
-                writer.WriteLine($"If you are not redirected automatically, please click <a href=\"{url}\">here</a>");
-                writer.WriteLine("</body>");
-                writer.WriteLine("</html>");
-            }
-
-            // Open temporary file with default browser
-            EditorUtility.OpenWithDefaultApp(tempHtmlPath); 
         }
 
         protected ToolbarButtonData AddButton(string name, Action callback, bool left = true)

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using Lattice.Base;
 using Lattice.IR;
+using Unity.Entities;
 using UnityEngine.Scripting.APIUpdating;
 
 namespace Lattice.Nodes
@@ -24,14 +25,17 @@ namespace Lattice.Nodes
 
         public override string DefaultName => "Entity";
 
-        public override void CompileToIR(GraphCompilation compilation)
+        public override void CompileToIR(IRGraph compilation)
         {
-           // Just returns the implicit entity node.
            IRNode entityNode = compilation.GetImplicitEntity(Graph);
            
-           compilation.Mappings[this].Nodes.Add(entityNode);
-           compilation.MapOutputPort(this, PortEntity, entityNode);
-           compilation.SetPrimaryNode(this, entityNode);
+           // We use a rerouted version instead of returning the actual node so that there is an IR node within each EntityNode
+           // to point at for debugging. The implicit entity is a graph node associated with no specific LatticeNode.
+           FunctionIRNode reroute = compilation.AddNode(Path, "ThisEntityReroute", CoreIRNodes.Identity(typeof(Entity)));
+           reroute.AddInput("value", entityNode);
+           
+           compilation.MapOutputPort(Path, PortEntity, reroute);
+           compilation.SetPrimaryNode(Path, reroute);
         }
     }
 }

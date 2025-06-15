@@ -34,7 +34,7 @@ namespace Lattice.Editor.Views
         public override void Initialize(BaseGraphView owner, BaseNode node)
         {
             base.Initialize(owner, node);
-            UpdateVisuals();
+            SetStyling();
         }
 
         /// <inheritdoc />
@@ -59,8 +59,8 @@ namespace Lattice.Editor.Views
                         ((EcsComponentNode)NodeTarget).SystemView = new SerializableType(system);
                     }
 
-                    UpdateVisuals();
-                    GraphCompiler.RecompileIfNeeded(true);
+                    SetStyling();
+                    GlobalGraph.LanguageServer.RecompileIfNeeded(force:true);
                 };
                 search.Show(selectSystem);
             });
@@ -69,7 +69,7 @@ namespace Lattice.Editor.Views
             return root;
         }
 
-        public void UpdateVisuals()
+        private void SetStyling()
         {
             EcsComponentNode node = (EcsComponentNode)NodeTarget;
             if (node.SystemView.IsMissing())
@@ -84,7 +84,13 @@ namespace Lattice.Editor.Views
             {
                 selectSystem.text = $"{node.SystemView.type.Name.Replace("LatticePhase", "")}";
             }
-
+            
+            if (node.ComponentType.IsMissing()) {
+                AddToClassList("node-missing");
+            } else {
+                RemoveFromClassList("node-missing");
+            }
+            
             // Update the title icon with the component type.
             TypeIndex type = node.ComponentType.type == null ? TypeIndex.Null : TypeManager.GetTypeIndex(node.ComponentType.type);
             string componentClass;

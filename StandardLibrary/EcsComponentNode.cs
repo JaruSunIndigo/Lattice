@@ -38,7 +38,7 @@ namespace Lattice.Nodes
     {
         private const string PortComponentInput = "componentData";
         private const string PortEntityInput = "entity";
-        
+
         [HideInInspector]
         public SerializableType ComponentType;
 
@@ -46,7 +46,7 @@ namespace Lattice.Nodes
         public bool AddDuringBake;
 
         private FieldInfo[] GetFields() => ComponentType.type.GetFields(BindingFlags.Instance | BindingFlags.Public |
-                                                                   BindingFlags.NonPublic);
+                                                                        BindingFlags.NonPublic);
 
         /// <summary>
         ///     Reads from this component will always happen *after* this system runs. May be null, in which case reads happen
@@ -61,11 +61,11 @@ namespace Lattice.Nodes
         {
             if (ComponentType.type == null)
             {
-                yield break; 
+                yield break;
             }
-            
+
             var componentFields = GetFields();
-            
+
             // Entity port to control what entity you're reading/writing from. 
             yield return new PortData(PortEntityInput, optional: true)
             {
@@ -77,7 +77,7 @@ namespace Lattice.Nodes
             int visibleFields = componentFields.Count(f => f.GetCustomAttribute<LatticeReadOnlyAttribute>() == null);
             if (!TypeManager.GetTypeInfo(TypeManager.GetTypeIndex(ComponentType.type)).IsZeroSized && visibleFields > 1)
             {
-                yield return new PortData(PortComponentInput, optional:true)
+                yield return new PortData(PortComponentInput, optional: true)
                 {
                     acceptMultipleEdges = false,
                     defaultType = ComponentType.type
@@ -91,14 +91,14 @@ namespace Lattice.Nodes
                 {
                     continue;
                 }
-                
+
                 // I think this is true? If this trips, we can update this code.
                 Assert.IsFalse(field.FieldType.IsNullable(), "IComponentData fields cannot be nullable.");
-                
-                yield return new PortData(field.Name + "_in",optional:true)
+
+                yield return new PortData(field.Name + "_in", optional: true)
                 {
                     acceptMultipleEdges = false,
-                    
+
                     // All inputs have type nullable, so that you can conditionally set them with a value. 
                     defaultType = typeof(Nullable<>).MakeGenericType(field.FieldType),
                 };
@@ -120,9 +120,9 @@ namespace Lattice.Nodes
         {
             if (ComponentType.type == null)
             {
-                yield break; 
+                yield break;
             }
-            
+
             var componentFields = GetFields();
 
             // Zero sized types can't be set to anything, so no main port.
@@ -165,7 +165,7 @@ namespace Lattice.Nodes
 
         // Compilation
 
-        public override void CompileToIR(GraphCompilation compilation)
+        public override void CompileToIR(IRGraph compilation)
         {
             if (ComponentType.type == null)
             {
@@ -184,33 +184,33 @@ namespace Lattice.Nodes
             IRNode entityInput;
             if (GetPort(PortEntityInput).GetEdges().Any())
             {
-                entityInput = compilation.AddNode(this, "EntityInput", CoreIRNodes.Identity(typeof(Entity)));
-                compilation.MapInputPort(this, PortEntityInput, entityInput, "value");
+                entityInput = compilation.AddNode(Path, "EntityInput", CoreIRNodes.Identity(typeof(Entity)));
+                compilation.MapInputPort(Path, PortEntityInput, entityInput, "value");
             }
             else
             {
                 // Use the default entity node if none is passed.
                 entityInput = compilation.GetImplicitEntity(Graph);
-                compilation.MapInputPort(this, PortEntityInput, null);
+                compilation.MapInputPort(Path, PortEntityInput, null);
             }
 
             // Write Stage:
             // Collects all of the inputs to the node and writes them into the ECS component.
             NodePort writeComponentPort = GetPort("componentData");
-            using var _ = CollectionPool<List<IRNode>, IRNode >.Get(out var writers);
+            using var _ = CollectionPool<List<IRNode>, IRNode>.Get(out var writers);
             if (writeComponentPort != null && writeComponentPort.GetEdges().Count > 0)
             {
-                var writeFull = compilation.AddNode(this, "ECSWrite",
+                var writeFull = compilation.AddNode(Path, "ECSWrite",
                     FunctionIRNode.FromStaticMethod<EcsComponentNode>(nameof(SetComponent), ComponentType.type));
 
                 writeFull.AddInput("entity", entityInput);
                 writers.Add(writeFull);
 
-                compilation.MapInputPort(this, "componentData", writeFull);
+                compilation.MapInputPort(Path, "componentData", writeFull);
             }
             else
             {
-                compilation.MapInputPort(this, "componentData", null);
+                compilation.MapInputPort(Path, "componentData", null);
             }
 
             // Add a writer for every connected field.
@@ -220,15 +220,16 @@ namespace Lattice.Nodes
                 string port = field.Name + "_in";
                 if (GetPort(port).GetEdges().Any())
                 {
-                    var writeField = compilation.AddNode(this, $"WriteField_{field.Name}", new WriteIComponentNode(field));
+                    var writeField =
+                        compilation.AddNode(Path, $"WriteField_{field.Name}", new WriteIComponentNode(field));
                     writeField.AddInput("entity", entityInput);
                     writers.Add(writeField);
 
-                    compilation.MapInputPort(this, port, writeField, "value");
+                    compilation.MapInputPort(Path, port, writeField, "value");
                 }
                 else
                 {
-                    compilation.MapInputPort(this, port, null);
+                    compilation.MapInputPort(Path, port, null);
                 }
             }
 
@@ -237,13 +238,13 @@ namespace Lattice.Nodes
             // This lets a normal ECS System run in between the Write and Read.
             // It lets you specify the 'time' when this node views the underlying component data.
 
-            var read = compilation.AddNode(this, "ECSRead",
+            var read = compilation.AddNode(Path, "ECSRead",
                 FunctionIRNode.FromStaticMethod<EcsComponentNode>(nameof(GetComponent), ComponentType.type));
 
             read.SystemPhase = SystemView?.type;
 
             read.AddInput("entity", entityInput);
-            
+
             foreach (var writer in writers)
             {
                 read.AddInput(IRNode.BarrierPort, writer);
@@ -252,32 +253,32 @@ namespace Lattice.Nodes
             // An edge is spawned between the two stages, but the value is unused. It's just important to order the side effects
             // of the two phases.
 
-            compilation.SetPrimaryNode(this, read);
-            compilation.Mappings[this].OutputPortMap["value_out"] = compilation.GetNodeRef(read);
+            compilation.SetPrimaryNode(Path, read);
+            compilation.MapOutputPort(Path, "value_out", read);
 
             // Every field on the component also gets a port so you can read from them individually.
             foreach (var field in componentFields)
             {
-                var fieldNode = compilation.AddFieldAccessor(this, read, field.Name, field.Name + "_out");
+                var fieldNode = compilation.AddFieldAccessor(Path, read, field.Name, field.Name + "_out");
 
                 if (field.FieldType == typeof(Entity))
                 {
                     if (field.GetCustomAttribute<EntityNotNullAttribute>() != null)
                     {
                         // Add an assert node to catch the error early, if it ever becomes null.
-                        var assertNonNull = compilation.AddNode(this,
+                        var assertNonNull = compilation.AddNode(Path,
                             FunctionIRNode.FromStaticMethod<EcsComponentNode>(nameof(AssertNonNull)));
                         assertNonNull.AddInput("e", fieldNode);
-                        compilation.MapOutputPort(this, field.Name + "_out", assertNonNull);
+                        compilation.MapOutputPort(Path, field.Name + "_out", assertNonNull);
                     }
                     else
                     {
                         // The Entity is potentially null. So lift it to nullability:
-                        var liftEntity = compilation.AddNode(this,
+                        var liftEntity = compilation.AddNode(Path,
                             FunctionIRNode.FromStaticMethod<EcsComponentNode>(nameof(LiftEntity)));
                         liftEntity.CheckExceptions = false;
                         liftEntity.AddInput("entity", fieldNode);
-                        compilation.MapOutputPort(this, field.Name + "_out", liftEntity);
+                        compilation.MapOutputPort(Path, field.Name + "_out", liftEntity);
                     }
                 }
             }
@@ -313,13 +314,12 @@ namespace Lattice.Nodes
 
             foreach (var componentType in TypeManager.GetAllTypes())
             {
-                if (componentType.Type == null 
+                if (componentType.Type == null
                     || !typeof(IComponentData).IsAssignableFrom(componentType.Type)
                     || TypeManager.IsManagedType(componentType.TypeIndex))
                 {
                     continue;
                 }
-                
 
                 yield return new NodeTemplateMenuItem
                 {

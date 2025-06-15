@@ -22,6 +22,8 @@ using Resources = UnityEngine.Resources;
 
 namespace Lattice.Editor.Views
 {
+    using DropdownStatus = DropdownMenuAction.Status;
+
     /// <summary>A visual element that renders a node on the canvas.</summary>
     [NodeCustomEditor(typeof(BaseNode))]
     public class BaseNodeView : NodeView
@@ -34,6 +36,9 @@ namespace Lattice.Editor.Views
         public const string TitleNameContainerHasCustomNameUssClassName = TitleNameContainerUssClassName + "--has-custom-name";
         public const string TitleIconUssClassName = UssClassName + "__title-icon";
         public const string HighlightedUssClassName = UssClassName + "--highlighted";
+        public const string CollapsedToUssClassName = UssClassName + "--collapsed-to";
+        public const string CollapsedToOutputUssClassName = CollapsedToUssClassName + "-output";
+        public const string CollapsedToInputUssClassName = CollapsedToUssClassName + "-input";
 
         // Element names:
         public const string TitleContainerName = "title";
@@ -119,6 +124,13 @@ namespace Lattice.Editor.Views
 
         private bool settingsExpanded;
 
+        /// <summary>Attacher used for CollapsedTo.</summary>
+        private CollapsedToAttacher collapsedToAttacher;
+        /// <summary>Clickable behaviour that's active while CollapsedTo.</summary>
+        private Clickable collapsedToClickable;
+        /// <summary>Manipulator used to display the tooltip while CollapsedTo.</summary>
+        private CollapsedToGraphTooltipManipulator collapsedToManipulator;
+        
         private IconBadges badges;
 
         // All of these are temp variables used in Alignment functions. Not for perf. Could be removed.
@@ -173,6 +185,23 @@ namespace Lattice.Editor.Views
 
             RegisterCallback<GeometryChangedEvent>(OnGeometryChanged);
             OnGeometryChanged(null);
+            RegisterCallback<DetachFromPanelEvent>(OnDetachedFromPanel);
+        }
+
+        private void OnDetachedFromPanel(DetachFromPanelEvent evt)
+        {
+            collapsedToAttacher?.Detach();
+            collapsedToAttacher = null;
+        }
+
+        /// <summary>
+        ///     Ran after all elements in the graph have run their initialize steps.
+        ///     Used to validate nodes and update views based on the complete setup.<br/>
+        ///     Also called after a paste operation.
+        /// </summary>
+        public void PostInitialize()
+        {
+            SetCollapsedTo(NodeTarget.CollapsedToState);
         }
 
         private void InitializePorts()
@@ -771,20 +800,9 @@ namespace Lattice.Editor.Views
             SetPosition(rect);
         }
 
-        public void ChangeLockStatus()
-        {
-            NodeTarget.IsLocked ^= true;
-        }
-
         public override void BuildContextualMenu(ContextualMenuPopulateEvent evt)
         {
             base.BuildContextualMenu(evt);
-            
-            if (NodeTarget.Lockable)
-            {
-                evt.menu.AppendAction(NodeTarget.IsLocked ? "Unlock" : "Lock", e => ChangeLockStatus(),
-                    action => DropdownMenuAction.Status.Normal);
-            }
 
             evt.menu.AppendAction("Dump Debug Data", action =>
             {
@@ -809,6 +827,199 @@ namespace Lattice.Editor.Views
                     }
                 }
             });
+            
+
+            if (NodeTarget.CollapsedToState != NodeCollapseToDirection.None)
+            {
+                evt.menu.AppendSeparator();
+                evt.menu.AppendAction("Expand to Full Size \u2195", _ =>
+                {
+                    foreach (BaseNodeView n in Owner.selection.OfType<BaseNodeView>())
+                    {
+                        n.SetCollapsedTo(NodeCollapseToDirection.None);
+                    }
+                });
+                evt.menu.AppendSeparator();
+            }
+            else if (CanCollapseTo())
+            {
+                evt.menu.AppendSeparator();
+                evt.menu.AppendAction(
+                    "Collapse/To Above \u2191",
+                    _ => SetCollapsedTo(NodeCollapseToDirection.ToOutput),
+                    CanCollapseToDirection(NodeCollapseToDirection.ToOutput) ? DropdownStatus.Normal : DropdownStatus.Disabled
+                );
+
+                evt.menu.AppendAction(
+                    "Collapse/To Below \u2193",
+                    _ => SetCollapsedTo(NodeCollapseToDirection.ToInput),
+                    CanCollapseToDirection(NodeCollapseToDirection.ToInput) ? DropdownStatus.Normal : DropdownStatus.Disabled
+                );
+                evt.menu.AppendSeparator();
+            }
+        }
+
+        private void SetCollapsedTo(NodeCollapseToDirection direction)
+        {
+            NodeCollapseToDirection prevState = NodeTarget.CollapsedToState;
+            // Validate
+            if (direction != NodeCollapseToDirection.None && !CanCollapseToDirection(direction))
+            {
+                direction = NodeCollapseToDirection.None;
+            }
+
+            if (NodeTarget.CollapsedToState != direction)
+            {
+                Owner.ModifyNodeByPropertyNameInt(NodeTarget, "collapsedToState", (int)direction);
+                NodeTarget.CollapsedToState = direction;
+            }
+
+            switch (direction)
+            {
+                case NodeCollapseToDirection.None:
+                    RemoveFromClassList(CollapsedToUssClassName);
+                    RemoveFromClassList(CollapsedToOutputUssClassName);
+                    RemoveFromClassList(CollapsedToInputUssClassName);
+                    if (collapsedToAttacher != null)
+                    {
+                        this.RemoveManipulator(collapsedToClickable);
+                        this.RemoveManipulator(collapsedToManipulator);
+                        
+                        collapsedToAttacher.Detach();
+                        collapsedToAttacher = null;
+                        // Refresh position from serialized data
+                        SetPosition(GetPosition());
+                        MarkDirtyRepaint();
+
+                        // Reset edges
+                        switch (prevState)
+                        {
+                            case NodeCollapseToDirection.ToOutput:
+                            {
+                                EdgeView inEdge = InputPortViews.FirstOrDefault()?.Edges.FirstOrDefault();
+                                if (inEdge != null)
+                                {
+                                    inEdge.IsHiddenCompletely = false;
+                                    inEdge.output?.SetEnabled(true);
+                                }
+                                break;
+                            }
+                            case NodeCollapseToDirection.ToInput:
+                            {
+                                EdgeView outEdge = OutputPortViews.FirstOrDefault()?.Edges.FirstOrDefault();
+                                if (outEdge != null)
+                                {
+                                    outEdge.IsHiddenCompletely = false;
+                                    outEdge.input?.SetEnabled(true);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    // Notably, exit to not perform common behaviour:
+                    return;
+                case NodeCollapseToDirection.ToOutput:
+                {
+                    AddToClassList(CollapsedToOutputUssClassName);
+                    EdgeView edgeView = InputPortViews.First().Edges.First();
+                    PortView port = (PortView)edgeView.output;
+                    port.SetEnabled(false);
+                    edgeView.IsHiddenCompletely = true;
+                    CreateCollapsedToAttacher(port, SpriteAlignment.BottomCenter);
+                    break;
+                }
+                case NodeCollapseToDirection.ToInput:
+                {
+                    AddToClassList(CollapsedToInputUssClassName);
+                    EdgeView edgeView = OutputPortViews.First().Edges.First();
+                    PortView port = (PortView)edgeView.input;
+                    port.SetEnabled(false);
+                    edgeView.IsHiddenCompletely = true;
+                    CreateCollapsedToAttacher(port, SpriteAlignment.TopCenter);
+                    break;
+                }
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(direction), direction, null);
+            }
+
+            // Common behaviour for collapsed nodes:
+            // When clicked, expand
+            this.AddManipulator(collapsedToClickable ??= new Clickable(() => SetCollapsedTo(NodeCollapseToDirection.None)));
+            this.AddManipulator(collapsedToManipulator ??= new CollapsedToGraphTooltipManipulator());
+            AddToClassList(CollapsedToUssClassName);
+            return;
+
+            void CreateCollapsedToAttacher(VisualElement target, SpriteAlignment alignment)
+            {
+                if (target == null)
+                {
+                    Debug.LogError("Target was null when creating CollapsedTo Attacher.");
+                    return;
+                }
+            
+                collapsedToAttacher = new CollapsedToAttacher(this, target, alignment, -3, () => SetCollapsedTo(NodeTarget.CollapsedToState));
+            }
+        }
+
+        /// <summary>Whether a node is allowed to collapse onto the ports of another. <seealso cref="BaseNode.CollapsedToState"/>.</summary>
+        protected virtual bool CanCollapseTo()
+        {
+            if (NodeTarget.InputPorts.Count > 1 || NodeTarget.OutputPorts.Count > 1)
+            {
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>Whether a node is allowed to collapse onto the ports of another in the provided direction. <seealso cref="BaseNode.CollapsedToState"/>.</summary>
+        private bool CanCollapseToDirection(NodeCollapseToDirection direction)
+        {
+            if (!CanCollapseTo())
+            {
+                return false;
+            }
+
+            switch (direction)
+            {
+                case NodeCollapseToDirection.ToOutput:
+                {
+                    if (NodeTarget.InputPorts.Count != 1)
+                        return false;
+                    NodePort port = NodeTarget.InputPorts[0];
+                    if (!port.portData.vertical)
+                        return false; // Currently don't support collapsing horizontally.
+                    List<SerializableEdge> edges = port.GetEdges();
+                    if (edges.Count != 1) return false;
+                    SerializableEdge edge = edges[0];
+                    BaseNode node = edge.fromNode;
+                    // Can't collapse on excluded nodes, and can't collapse two nodes together.
+                    if (!node.AllowsCollapsedNodesOnPorts || node.CollapsedToState == NodeCollapseToDirection.ToInput)
+                        return false;
+                    // The port can't have multiple connected edges, only this one.
+                    return edge.fromPort.GetEdges().Count == 1;
+                }
+                case NodeCollapseToDirection.ToInput:
+                {
+                    if (NodeTarget.OutputPorts.Count != 1)
+                        return false;
+                    NodePort port = NodeTarget.OutputPorts[0];
+                    if (!port.portData.vertical)
+                        return false; // Currently don't support collapsing horizontally.
+                    List<SerializableEdge> edges = port.GetEdges();
+                    if (edges.Count != 1) return false;
+                    SerializableEdge edge = edges[0];
+                    BaseNode node = edge.toNode;
+                    // Can't collapse on excluded nodes, and can't collapse two nodes together.
+                    if (!node.AllowsCollapsedNodesOnPorts || node.CollapsedToState == NodeCollapseToDirection.ToOutput)
+                        return false;
+                    // The port can't have multiple connected edges, only this one.
+                    return edge.fromPort.GetEdges().Count == 1;
+                }
+                case NodeCollapseToDirection.None:
+                    throw new ArgumentException($"{NodeCollapseToDirection.None} is an invalid direction to query.", nameof(direction));
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(direction), direction, null);
+            }
         }
 
         public virtual bool RefreshAllPorts()

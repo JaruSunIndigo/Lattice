@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Lattice.Base;
 using Lattice.IR;
 using Lattice.StandardLibrary;
+using Lattice.Utils;
 using Unity.Assertions;
 using Unity.Entities;
 using UnityEngine;
@@ -38,7 +39,7 @@ namespace Lattice.StandardLibrary
         protected override Entity? BakeData(IBaker baker, LatticeExecutorAuthoring authoring)
         {
             Transform child = SearchChildren ? GetChildWithName(authoring.gameObject, GameObjectName) : authoring.transform.Find(GameObjectName);
-            Assert.IsNotNull(child, $"Could not find child named [{GameObjectName}].");
+            Assert.IsNotNull(child, $"Could not find child named [{GameObjectName}] on parent [{authoring.gameObject.GetPathString()}].");
             return baker.GetEntity(child, TransformUsageFlags.Dynamic);
         }
 
@@ -61,25 +62,27 @@ namespace Lattice.StandardLibrary
             return null;
         }
 
-        public override void CompileToIR(GraphCompilation compilation)
+        public override void CompileToIR(IRGraph compilation)
         {
             base.CompileToIR(compilation);
 
-            var bakedEntity = compilation.Mappings[this].Nodes[0];
-            compilation.MapOutputPort(this, "prefabEntity", bakedEntity);
+            var bakedEntity = compilation.GetNodesUnderPath(Path)[0];
+            compilation.SetPrimaryNode(Path, bakedEntity);
+            compilation.MapOutputPort(Path, "prefabEntity", bakedEntity);
 
             // Add enabling / disabling.
             if (GetPort("enabled").GetEdges().Count > 0)
             {
-                var enableNode = compilation.AddNode(this,
+                var enableNode = compilation.AddNode(Path,
                     FunctionIRNode.FromStaticMethod<ChildEntityReference>(nameof(SetEnabled)));
                 enableNode.AddInput("entity", bakedEntity);
-                compilation.MapInputPort(this, "enabled", enableNode, "enabled");
+                compilation.MapInputPort(Path, "enabled", enableNode, "enabled");
             }
             else
             {
-                compilation.MapInputPort(this, "enabled", null);
+                compilation.MapInputPort(Path, "enabled", null);
             }
+            
         }
 
         public static void SetEnabled(EntityManager em, Entity entity, bool enabled)

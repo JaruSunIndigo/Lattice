@@ -1,9 +1,6 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Linq;
-using System.Net;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using JetBrains.Annotations;
@@ -14,19 +11,13 @@ using Lattice.IR;
 using Lattice.Nodes;
 using Lattice.StandardLibrary;
 using Lattice.Utils;
-using Unity.Collections;
 using Unity.Entities;
-using Unity.Entities.UI;
 using Unity.Mathematics;
-using Unity.Properties;
 using Unity.Serialization.Json;
 using UnityEditor;
 using UnityEditor.Experimental.GraphView;
-using UnityEditor.UIElements;
 using UnityEngine;
-using UnityEngine.Assertions;
 using UnityEngine.UIElements;
-using Assert = Unity.Assertions.Assert;
 
 namespace Lattice.Editor.Views
 {
@@ -35,7 +26,8 @@ namespace Lattice.Editor.Views
     {
         public const string LiftedToNullableUssClassName = UssClassName + "--nullable-lifted";
 
-        public LatticeNode Target => (LatticeNode)base.NodeTarget;
+        // todo: We will eventually change Graph over to a graph path sort of thing when subgraphs arrive.
+        public CodePath Target => new(((LatticeGraphView)Owner).Graph, (LatticeNode)NodeTarget);
 
         // Whether to show the output value and state under the node.
         private bool ShowDebugValue
@@ -79,12 +71,12 @@ namespace Lattice.Editor.Views
         {
             base.Initialize(owner, node);
 
-            if (Target.MalformedReason is not null and var reason)
+            if (Target.Last.MalformedReason is not null and var reason)
             {
                 AddMessageView(reason.Message, NodeMessageType.Error);
             }
 
-            if (Target.ActionPorts.Count > 0)
+            if (Target.Last.ActionPorts.Count > 0)
             {
                 this.Q(TitleContainerName).style.backgroundColor = new Color(0.0509f, 0.2784f, 0.2941f);
             }
@@ -96,12 +88,14 @@ namespace Lattice.Editor.Views
             // If the graph is compiled and has this node in it.
             try
             {
-                GraphCompilation c = GraphCompiler.RecompileIfNeeded();
-                if (c.SourceGraphs.Contains((LatticeGraph)Owner.Graph))
+                GraphCompilation c = GlobalGraph.LanguageServer.RecompileIfNeeded();
+                if (c.ContainsGraphBody((LatticeGraph)Owner.Graph))
                 {
                     UpdateCompilationInfo(c);
                 }
-            } catch (Exception _) {
+            }
+            catch (Exception _)
+            {
                 //ignored
             }
 
@@ -146,17 +140,16 @@ namespace Lattice.Editor.Views
             GraphCompilation compilation = null;
             try
             {
-                compilation = GraphCompiler.AddAndRecompileIfNeeded((LatticeGraph)Owner.Graph);
+                compilation = GlobalGraph.LanguageServer.AddAndRecompileIfNeeded((LatticeGraph)Owner.Graph);
             }
             catch (Exception _)
             {
                 // ignored
             }
 
-            bool liftedToNullable =
-                compilation != null &&
-                compilation.Mappings.TryGetValue((LatticeNode)NodeTarget, out var mapping) &&
-                mapping.PrimaryNode.Node is FunctionIRNode fNode && fNode.NullableLiftedPorts.Any();
+            bool liftedToNullable = compilation?.Graph.GetPrimaryNode(Target) is FunctionIRNode fNode &&
+                                    fNode.NullableLiftedPorts.Any();
+
             EnableInClassList(LiftedToNullableUssClassName, liftedToNullable);
 
             // Update output port view types from the compilation.
@@ -169,7 +162,7 @@ namespace Lattice.Editor.Views
                     continue;
                 }
 
-                PortData outputPort = Target.OutputPorts[portIndex++].portData;
+                PortData outputPort = Target.Last.OutputPorts[portIndex++].portData;
                 outputPortView.UpdatePortView(outputPort);
                 if (compilation != null)
                 {
@@ -194,7 +187,7 @@ namespace Lattice.Editor.Views
             // Update port type from compilation..
             try
             {
-                GraphCompilation compilation = GraphCompiler.AddAndRecompileIfNeeded((LatticeGraph)Owner.Graph);
+                GraphCompilation compilation = GlobalGraph.LanguageServer.AddAndRecompileIfNeeded((LatticeGraph)Owner.Graph);
                 p.SetTypeFromCompilation(compilation);
             }
             catch (Exception _)
@@ -208,26 +201,26 @@ namespace Lattice.Editor.Views
         /// <remarks>This should not call CompileNode(). It shouldn't cause compilation, just display.</remarks>
         public void UpdateCompilationInfo([CanBeNull] GraphCompilation compilation)
         {
-            if (compilation == null || !compilation.Mappings.TryGetValue(Target, out GraphCompilation.Mapping mapping))
+            if (compilation == null || !compilation.Graph.ContainsCodePath(Target))
             {
                 compileInfo.text = "Node not compiled in this execution.";
                 return;
             }
 
-            IRNode primaryNode = mapping.PrimaryNode.Node;
+            IRNode primaryNode = compilation.Graph.GetPrimaryNode(Target);
             Metadata compileData = compilation.CompileNode(primaryNode);
 
-            string compileErrorText = null;
             if (compileData.CompilationError != null)
             {
-                bool nodeOwnsError = compilation.IsNodeOwnedBy(compileData.CompilationError.Node, Target);
-                compileErrorText = compilation.IsNodeOwnedBy(compileData.CompilationError.Node, Target)
-                    ? "Node had compilation error.\n"
-                    : $"Input node had compile error. [{compileData.CompilationError.Node}]\n";
-
-                switch (compileData.InnerCompilationError)
+                if (!compilation.Graph.IsNodeOwnedBy(compileData.CompilationError.Node, Target))
                 {
-                    case LatticePortException portException when nodeOwnsError:
+                    // Don't show messages for compiler errors in parents.
+                    return;
+                }
+
+                switch (compileData.CompilationError.InnerException)
+                {
+                    case LatticePortException portException:
                     {
                         PortView port = GetPort(portException.PortIdentifier);
                         if (port == null)
@@ -245,10 +238,7 @@ namespace Lattice.Editor.Views
                     }
                     default:
                     {
-                        AddMessageView(
-                            nodeOwnsError
-                                ? compileData.CompilationError.ToString()
-                                : compileErrorText, NodeMessageType.Error);
+                        AddMessageView(compileData.CompilationError.ToString(), NodeMessageType.Error);
                         break;
                     }
                 }
@@ -259,9 +249,9 @@ namespace Lattice.Editor.Views
                 return;
             }
 
-            if (compileErrorText != null)
+            if ((string)null != null)
             {
-                compileInfo.text = compileErrorText;
+                compileInfo.text = null;
             }
 
             StringBuilder b = new();
@@ -297,7 +287,7 @@ namespace Lattice.Editor.Views
                 return;
             }
 
-            if (!execution.Graph.Mappings.ContainsKey(Target))
+            if (!execution.Compilation.Graph.ContainsCodePath(Target))
             {
                 debugNodeValue.text = "Node was not in executed graph.";
                 return;
@@ -309,20 +299,20 @@ namespace Lattice.Editor.Views
                 return;
             }
 
-            IRNode primaryNode = execution.Graph.Mappings[Target].PrimaryNode.Node;
-            if (!execution.Graph.MetadataDb.TryGetValue(primaryNode, out Metadata compileData))
+            IRNode primaryNode = execution.Compilation.Graph.GetPrimaryNode(Target);
+            if (!execution.Compilation.MetadataDb.TryGetValue(primaryNode, out Metadata compileData))
             {
                 debugNodeValue.text = "Node was not compiled.";
                 return;
             }
 
-            if (!((LatticeGraphView)Owner).TryGetViewingEntity(execution.Graph, primaryNode, out Entity entity))
+            if (!((LatticeGraphView)Owner).TryGetViewingEntity(execution.Compilation, primaryNode, out Entity entity))
             {
                 debugNodeValue.text = "No entity selected in toolbar.";
                 return;
             }
 
-            if (execution.DebugData.Values.TryGetValue(entity, primaryNode, out object value))
+            if (execution.DebugData.Values.TryGetValue((entity, primaryNode), out object value))
             {
                 debugNodeValue.text =
                     value != null
@@ -331,10 +321,10 @@ namespace Lattice.Editor.Views
                             : ObjectToDebugString(value)
                         : "null"; // todo: allow selecting entity in menu
 
-                if (Target.StateType != null)
+                if (Target.Last.IsStatefulNode)
                 {
-                    IRNode stateDebugNode = execution.Graph.Mappings[Target].StateDebugNode!.Node;
-                    if (execution.DebugData.Values.TryGetValue(entity, stateDebugNode, out object state))
+                    IRNode stateDebugNode = execution.Compilation.Graph.GetStateDebugNode(Target);
+                    if (execution.DebugData.Values.TryGetValue((entity, stateDebugNode), out object state))
                     {
                         debugNodeValue.text += "\nState: " + ObjectToDebugString(state);
                     }
@@ -430,7 +420,7 @@ namespace Lattice.Editor.Views
             evt.menu.AppendAction("Show Compile Info", e =>
                 {
                     showCompileData = !showCompileData;
-                    UpdateCompilationInfo(ExecutionHistory.MostRecent?.Graph);
+                    UpdateCompilationInfo(ExecutionHistory.MostRecent?.Compilation);
                     compileDataContainer.style.display = showCompileData ? DisplayStyle.Flex : DisplayStyle.None;
                 },
                 _ => showCompileData ? DropdownMenuAction.Status.Checked : DropdownMenuAction.Status.Normal);
@@ -440,19 +430,20 @@ namespace Lattice.Editor.Views
             base.BuildContextualMenu(evt);
 
             evt.menu.InsertAction(evt.menu.MenuItems().Count,
-                !Target.DoNotLogErrors ? "Disable Error Logging" : "Enable Error Logging",
+                !Target.Last.DoNotLogErrors ? "Disable Error Logging" : "Enable Error Logging",
                 _ =>
                 {
-                    Target.DoNotLogErrors = !Target.DoNotLogErrors;
+                    Target.Last.DoNotLogErrors = !Target.Last.DoNotLogErrors;
                 });
 
             evt.menu.AppendAction("Show Selected In GraphViz", _ =>
             {
                 var nodes = Owner.selection.Where(s => s is LatticeNodeView).Select(s => ((LatticeNodeView)s).Target);
-                GraphCompiler.AddToCompilation(((LatticeGraphView)Owner).Graph);
-                GraphCompilation graph = GraphCompiler.RecompileIfNeeded();
-                var irNodes = nodes.SelectMany(n => graph.Mappings[n].Nodes).ToList();
-                LatticeGraphToolbar.OpenGraphviz(GraphCompilation.ToDot(graph, irNodes));
+
+                GlobalGraph.LanguageServer.AddToCompilation(((LatticeGraphView)Owner).Graph);
+                GraphCompilation graph = GlobalGraph.LanguageServer.RecompileIfNeeded();
+                var irNodes = nodes.SelectMany(n => graph.Graph.GetNodesUnderPath(n)).ToList();
+                GraphUtils.OpenGraphviz(GraphCompilation.ToDot(graph, irNodes));
             });
 
             evt.menu.AppendAction("Find References", _ => FindReferences());
@@ -469,7 +460,7 @@ namespace Lattice.Editor.Views
 
                 foreach (var node in graph.LatticeNodes<CrossRefNode>())
                 {
-                    if (node.ResolvedNode == Target)
+                    if (node.ResolvedNode is { } resolved && resolved.Last == Target.Last)
                     {
                         b.AppendLine($"- [{node}]");
                     }

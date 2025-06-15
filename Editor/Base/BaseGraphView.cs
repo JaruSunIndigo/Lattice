@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using JetBrains.Annotations;
 using Lattice.Base;
 using Lattice.Editor.Tools;
 using Lattice.Editor.Utils;
@@ -57,9 +58,7 @@ namespace Lattice.Editor.Views
 
         private VisualElement malformedTextBox;
         private Vector2 cachedMousePosition;
-        private const string ErrorMessageForMissingEdgeConnection =
-            "Port was removed from the node.\nRemove the connections; or if you modified the node, consider re-adding the port.";
-        
+
         private double lastCreatedRedirectTime = -1;
 
         public BaseGraphView(EditorWindow window)
@@ -75,7 +74,8 @@ namespace Lattice.Editor.Views
             RegisterCallback<MouseDownEvent>(MouseDownCallback);
 
             ContentDragger contentDragger = new();
-            contentDragger.activators.Add(new ManipulatorActivationFilter { button = MouseButton.MiddleMouse, modifiers = EventModifiers.Alt });
+            contentDragger.activators.Add(new ManipulatorActivationFilter
+                { button = MouseButton.MiddleMouse, modifiers = EventModifiers.Alt });
             this.AddManipulator(contentDragger);
             this.AddManipulator(new SelectionDragger());
             this.AddManipulator(new RectangleSelector());
@@ -93,31 +93,36 @@ namespace Lattice.Editor.Views
 
             // Deregister callbacks and unload graph when we remove the view.
             RegisterCallback<DetachFromPanelEvent>(_ => Undo.undoRedoPerformed -= OnUndo);
-            
+
             RegisterCallback<MouseMoveEvent>(OnMouseMoveEvent);
-            
+
             return;
 
             // ReSharper disable once ParameterHidesMember
-            void CreateRedirectFromKnife(Vector2 position, IEnumerable<Edge> edges) {
+            void CreateRedirectFromKnife(Vector2 position, IEnumerable<Edge> edges)
+            {
                 // Only register an undo for one operation.
                 // There can be many redirects created at once with the edge knife.
                 double timeSinceStartup = EditorApplication.timeSinceStartup;
-                if (Math.Abs(lastCreatedRedirectTime - timeSinceStartup) > 0.01) {
+                if (Math.Abs(lastCreatedRedirectTime - timeSinceStartup) > 0.01)
+                {
                     Undo.RegisterCompleteObjectUndo(Graph, "Create Redirect");
                     lastCreatedRedirectTime = timeSinceStartup;
                 }
 
                 position += new Vector2(-10f, -10);
                 RedirectNodeView relayNode = null;
-                foreach (Edge e in edges) {
+                foreach (Edge e in edges)
+                {
                     var edge = (EdgeView)e;
-                    if (relayNode == null) {
+                    if (relayNode == null)
+                    {
                         // If we've not yet created a relay node for these edges, create it now.
                         relayNode = AddRedirectNode((PortView)edge.output, (PortView)edge.input, position);
                         Disconnect(edge); // The previous edge should be disconnected and discarded.
                     }
-                    else {
+                    else
+                    {
                         // Re-route the edges to the relay node.
                         PortView newOutputPort = relayNode.OutputPortViews[0];
                         Disconnect(edge);
@@ -129,7 +134,7 @@ namespace Lattice.Editor.Views
         }
 
         private IVisualElementScheduledItem scheduledNodeSelectionChange;
-        
+
         /// <summary>Call when nodes are selected or deselected.</summary>
         public void NodeSelectionChanged()
         {
@@ -187,7 +192,7 @@ namespace Lattice.Editor.Views
 
                 return;
             }
-            
+
             ConnectorListener = new EdgeConnectorListener((LatticeGraphView)this);
 
             InitializeNodeViews();
@@ -195,6 +200,8 @@ namespace Lattice.Editor.Views
             InitializeGroups();
             InitializeStickyNotes();
             InitializeStackNodes();
+
+            PostInitialize();
 
             Graph.OnGraphChanges += GraphChangesCallback;
 
@@ -274,24 +281,30 @@ namespace Lattice.Editor.Views
                 NodeViewsPerNode.TryGetValue(serializedEdge.toNode, out var inputNodeView);
                 NodeViewsPerNode.TryGetValue(serializedEdge.fromNode, out var outputNodeView);
 
-                PortView inputPort = inputNodeView?.GetPortOrAddVirtualPort(serializedEdge.toPortIdentifier, Direction.Input);
-                PortView outputPort = outputNodeView?.GetPortOrAddVirtualPort(serializedEdge.fromPortIdentifier, Direction.Output);
-                
+                PortView inputPort =
+                    inputNodeView?.GetPortOrAddVirtualPort(serializedEdge.toPortIdentifier, Direction.Input);
+                PortView outputPort =
+                    outputNodeView?.GetPortOrAddVirtualPort(serializedEdge.fromPortIdentifier, Direction.Output);
+
                 if (inputNodeView == null || outputNodeView == null || inputPort == null || outputPort == null)
                 {
                     Debug.LogError(
                         $"Edge [{serializedEdge}] could not find inputs. Completely detached from graph.");
                     continue;
                 }
-                
+
                 if (inputPort.IsVirtual)
                 {
-                    inputPort.AddMessageView(ErrorMessageForMissingEdgeConnection, NodeMessageType.Error, false);
+                    inputPort.AddMessageView(
+                        $"Input port was removed from the node. [{inputPort.portName}] \nRemove the connections; or if you modified the node, consider re-adding the port.",
+                        NodeMessageType.Error, false);
                 }
-                
+
                 if (outputPort.IsVirtual)
                 {
-                    inputPort.AddMessageView(ErrorMessageForMissingEdgeConnection, NodeMessageType.Error, false);
+                    outputPort.AddMessageView(
+                        $"Output port was removed from the node. [{outputPort.portName}] \nRemove the connections; or if you modified the node, consider re-adding the port.",
+                        NodeMessageType.Error, false);
                 }
 
                 var edgeView = new EdgeView
@@ -305,7 +318,7 @@ namespace Lattice.Editor.Views
 
                 AddElement(edgeView);
 
-                ConnectEdgeView(edgeView);
+                ConnectEdgeView(edgeView, false);
 
                 EdgeViews.Add(edgeView);
             }
@@ -332,6 +345,19 @@ namespace Lattice.Editor.Views
             foreach (var stackNode in Graph.stackNodes)
             {
                 AddStackNodeView(stackNode);
+            }
+        }
+
+        /// <summary>
+        ///     Ran after all elements in the graph have run their initialize steps.
+        ///     Used to validate nodes and update views based on the complete setup.<br/>
+        ///     Also called after a paste operation.
+        /// </summary>
+        private void PostInitialize()
+        {
+            foreach (BaseNodeView nodeView in NodeViews)
+            {
+                nodeView.PostInitialize();
             }
         }
 
@@ -398,7 +424,7 @@ namespace Lattice.Editor.Views
         private void UnserializeAndPasteCallback(string operationName, string serializedData)
         {
             ClearSelection();
-            
+
             var data = JsonUtility.FromJson<CopyPasteHelper>(serializedData);
 
             Undo.RegisterCompleteObjectUndo(Graph, operationName);
@@ -472,9 +498,10 @@ namespace Lattice.Editor.Views
 
                 edge.Deserialize();
                 edge.RemapNodes(Graph, copiedNodesMap);
-                if (edge.toNode == null || edge.fromNode == null || 
+                if (edge.toNode == null || edge.fromNode == null ||
                     // Logic that prepares for subgraph support.
-                    !Graph.NodesPerFileId.ContainsKey(edge.toNode.FileId) || !Graph.NodesPerFileId.ContainsKey(edge.fromNode.FileId))
+                    !Graph.NodesPerFileId.ContainsKey(edge.toNode.FileId) ||
+                    !Graph.NodesPerFileId.ContainsKey(edge.fromNode.FileId))
                 {
                     continue;
                 }
@@ -486,7 +513,16 @@ namespace Lattice.Editor.Views
                 {
                     continue;
                 }
-                
+
+                // We also check that the edge isn't connecting to a port with another node collapsed on it.
+                if (edge.toPort.GetEdges().Count > 0 && edge.toPort.GetEdges().First().fromNode.CollapsedToState ==
+                    NodeCollapseToDirection.ToInput ||
+                    edge.fromPort.GetEdges().Count > 0 && edge.fromPort.GetEdges().First().toNode.CollapsedToState ==
+                    NodeCollapseToDirection.ToOutput)
+                {
+                    continue;
+                }
+
                 var edgeView = new EdgeView
                 {
                     userData = edge,
@@ -495,6 +531,15 @@ namespace Lattice.Editor.Views
                 };
 
                 Connect(edgeView);
+            }
+
+            // Call PostInitialize on all the created nodes.
+            foreach (BaseNode node in copiedNodesMap.Select(kvp => kvp.Value))
+            {
+                if (NodeViewsPerNode.TryGetValue(node, out var view))
+                {
+                    view.PostInitialize();
+                }
             }
         }
 
@@ -581,7 +626,7 @@ namespace Lattice.Editor.Views
                 var edge = EdgeViews.FirstOrDefault(e => e.SerializedEdge == changes.removedEdge);
 
                 DisconnectView(edge);
-                
+
                 CleanupRedirectIfRequiredAfterDelay(changes.removedEdge.fromNode);
                 CleanupRedirectIfRequiredAfterDelay(changes.removedEdge.toNode);
             }
@@ -598,9 +643,9 @@ namespace Lattice.Editor.Views
             {
                 ReloadEntireGraph();
             }
-            
+
             return;
-            
+
             void CleanupRedirectIfRequiredAfterDelay(BaseNode node)
             {
                 if (node is not RedirectNode redirect)
@@ -645,13 +690,13 @@ namespace Lattice.Editor.Views
         public override void BuildContextualMenu(ContextualMenuPopulateEvent evt)
         {
             base.BuildContextualMenu(evt);
-            
+
             Vector2 position1 =
                 (evt.currentTarget as VisualElement).ChangeCoordinatesTo(contentViewContainer, evt.localMousePosition);
             evt.menu.AppendAction("Create Group",
                 e => AddSelectionsToGroup(AddGroup(new Group("Create Group", position1))),
                 DropdownMenuAction.AlwaysEnabled);
-            
+
             evt.menu.AppendAction("Create Sticky Note",
                 e => AddStickyNote(new StickyNote("Create Note", position1)), DropdownMenuAction.AlwaysEnabled);
 
@@ -734,7 +779,7 @@ namespace Lattice.Editor.Views
             }
             StackNodeViews.Clear();
         }
-        
+
         /// <summary>Create a redirect node between <paramref name="outputPort"/> and <paramref name="inputPort"/></summary>
         public RedirectNodeView AddRedirectNode(PortView outputPort, PortView inputPort, float2 position)
         {
@@ -824,14 +869,14 @@ namespace Lattice.Editor.Views
         {
             foreach (var selectedNode in selection)
             {
-                if (selectedNode is BaseNodeView)
+                if (selectedNode is BaseNodeView nodeView)
                 {
                     if (GroupViews.Exists(x => x.ContainsElement(selectedNode as BaseNodeView)))
                     {
                         continue;
                     }
 
-                    view.AddElement(selectedNode as BaseNodeView);
+                    view.AddElement(nodeView);
                 }
             }
         }
@@ -845,17 +890,17 @@ namespace Lattice.Editor.Views
             GroupViews.Clear();
         }
 
-        public bool ConnectEdgeView(EdgeView e, bool autoDisconnectInputs = true)
+        public bool ConnectEdgeView(EdgeView e, bool autoDisconnectInputs)
         {
             Assert.IsTrue(e.IsValid());
 
-            var inputPortView = e.input as PortView;
-            var outputPortView = e.output as PortView;
-            var inputNodeView = inputPortView.node as BaseNodeView;
-            var outputNodeView = outputPortView.node as BaseNodeView;
+            var inputPortView = (PortView)e.input;
+            var outputPortView = (PortView)e.output;
+            var inputNodeView = (BaseNodeView)inputPortView.node;
+            var outputNodeView = (BaseNodeView)outputPortView.node;
 
             //If the input port does not support multi-connection, we remove them
-            if (autoDisconnectInputs && !(e.input as PortView).PortData.acceptMultipleEdges)
+            if (autoDisconnectInputs && !inputPortView.PortData.acceptMultipleEdges)
             {
                 foreach (var edge in EdgeViews.Where(ev => ev.input == e.input).ToList())
                 {
@@ -864,7 +909,7 @@ namespace Lattice.Editor.Views
                 }
             }
             // same for the output port:
-            if (autoDisconnectInputs && !(e.output as PortView).PortData.acceptMultipleEdges)
+            if (autoDisconnectInputs && !outputPortView.PortData.acceptMultipleEdges)
             {
                 foreach (var edge in EdgeViews.Where(ev => ev.output == e.output).ToList())
                 {
@@ -880,14 +925,8 @@ namespace Lattice.Editor.Views
 
             // If the input port have been removed by the custom port behavior
             // we try to find if it's still here
-            if (e.input == null)
-            {
-                e.input = inputNodeView.GetPort(inputPortView.PortData.identifier);
-            }
-            if (e.output == null)
-            {
-                e.output = inputNodeView.GetPort(outputPortView.PortData.identifier);
-            }
+            e.input ??= inputNodeView.GetPort(inputPortView.PortData.identifier);
+            e.output ??= inputNodeView.GetPort(outputPortView.PortData.identifier);
 
             EdgeViews.Add(e);
 
@@ -917,7 +956,7 @@ namespace Lattice.Editor.Views
             {
                 throw new Exception("Invalid portViews. Can't connect them!");
             }
-            
+
             var edgeView = new EdgeView
             {
                 input = inputPortView,
@@ -1008,7 +1047,7 @@ namespace Lattice.Editor.Views
         {
             var compatiblePorts = new List<Port>();
 
-            if (startPort is not PortView startPortView)
+            if (startPort is not PortView { enabledSelf: true } startPortView)
             {
                 return new List<Port>();
             }
@@ -1016,6 +1055,11 @@ namespace Lattice.Editor.Views
             compatiblePorts.AddRange(ports.ToList().Where(p =>
             {
                 if (p is not PortView portView)
+                {
+                    return false;
+                }
+
+                if (!p.enabledSelf)
                 {
                     return false;
                 }
@@ -1030,7 +1074,7 @@ namespace Lattice.Editor.Views
                     return false;
                 }
 
-                //Check for type assignability
+                // Check for type assignability.
                 if (startPort.direction == Direction.Input)
                 {
                     if (!BaseGraph.TypesAreConnectable(p.portType, startPort.portType))
@@ -1046,10 +1090,31 @@ namespace Lattice.Editor.Views
                     }
                 }
 
-                //Check if the edge already exists
+                // Check if the edge already exists.
                 if (portView.Edges.Any(e => e.input == startPort || e.output == startPort))
                 {
                     return false;
+                }
+
+                // Check if the node has been collapsed in that direction.
+                if (portView.Owner != null &&
+                    portView.Owner.NodeTarget.CollapsedToState != NodeCollapseToDirection.None)
+                {
+                    BaseNode node = portView.Owner.NodeTarget;
+                    if (startPort.direction == Direction.Input)
+                    {
+                        if (node.CollapsedToState == NodeCollapseToDirection.ToInput)
+                        {
+                            return false;
+                        }
+                    }
+                    else
+                    {
+                        if (node.CollapsedToState == NodeCollapseToDirection.ToOutput)
+                        {
+                            return false;
+                        }
+                    }
                 }
 
                 return true;
@@ -1081,11 +1146,34 @@ namespace Lattice.Editor.Views
             }
         }
 
+        private SerializedProperty GetNodePropertyByName(BaseNode node, string propertyName)
+        {
+            int nodeIndex = Graph.nodes.IndexOf(node);
+            if (nodeIndex < 0)
+            {
+                Debug.LogWarning($"Node was not found when setting \"{propertyName}\" property.");
+                return null;
+            }
+            SerializedGraph.UpdateIfRequiredOrScript();
+            return SerializedGraph.FindProperty(nameof(Graph.nodes))
+                                  .GetArrayElementAtIndex(nodeIndex)
+                                  .FindPropertyRelative(propertyName);
+        }
+
+        /// <summary>Modify the Graph's SerializedObject to update an int property of the provided node.</summary>
+        internal void ModifyNodeByPropertyNameInt(BaseNode node, string propertyName, int value)
+        {
+            SerializedProperty property = GetNodePropertyByName(node, propertyName);
+            property.intValue = value;
+            property.serializedObject.ApplyModifiedProperties();
+            EditorUtility.SetDirty(Graph);
+        }
+
         /// <inheritdoc />
         public override EventPropagation DeleteSelection()
         {
             TryDissolveRedirectNodes();
-            
+
             return base.DeleteSelection();
 
             // If relevant, removes redirect nodes but without removing the connections.
@@ -1098,14 +1186,14 @@ namespace Lattice.Editor.Views
                     {
                         continue;
                     }
-                    
+
                     EdgeView from = redirect.InputPortViews[0].Edges.FirstOrDefault();
                     if (from == null || selectionSet.Contains(from))
                     {
                         // If an input to a redirect node is in the selection, it cannot be dissolved.
                         continue;
                     }
-                    
+
                     foreach (PortView p in redirect.OutputPortViews)
                     {
                         foreach (EdgeView edge in p.Edges)
@@ -1124,7 +1212,8 @@ namespace Lattice.Editor.Views
                                 CreateNewEdge(fromOutput, toInput);
                             };
                         }
-                    };
+                    }
+                    ;
                 }
             }
         }

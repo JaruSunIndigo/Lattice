@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Linq;
 using Lattice.Base;
 using Lattice.IR;
+using Lattice.IR.Nodes;
 using Unity.Entities;
 using UnityEngine.Assertions;
 using UnityEngine.Scripting.APIUpdating;
@@ -29,38 +31,48 @@ namespace Lattice.Nodes
             };
         }
 
-        public override void CompileToIR(GraphCompilation compilation)
+        public override void CompileToIR(IRGraph compilation)
         {
-            if (ResolvedNode == null)
+            if (!ResolvedNode.HasValue)
             {
-                compilation.AddNode(this, new MalformedIRNode("No node selected in Reference node."));
+                if (IsDisconnected()) {
+                    compilation.AddNode(Path, new MalformedIRNode($"Couldn't find target node [{string.Join("/",NodePath)}] with port [{OtherPort}] on graph [{OtherGraph?.name ?? "Invalid graph ref"}]."));
+                }
+                else
+                {
+                    compilation.AddNode(Path, new MalformedIRNode("No node selected in Reference node."));
+                }
                 return;
             }
             
-            compilation.AddNode(this, new QualifierTransformIRNode());
-        }
-
-        public override void AddAdditionalEdges(GraphCompilation compilation)
-        {
-            // Add edge to the resolved node in the other graph.
-            // Add a direct edge in the compilation between the two graphs.
-            // We have to do this in the second pass here, to guarantee the other node is created.
-            GraphCompilation.Mapping otherNodeMapping = compilation.Mappings[ResolvedNode];
-
-            // If the referenced port is missing on the other node, just do nothing.
-            if (!otherNodeMapping.OutputPortMap.ContainsKey(OtherPort))
+            if (ResolvedNode.Value.Last.OutputPorts.All(p => p.portData.identifier != OtherPort))
             {
-                compilation.ReplaceNodeWithMalformed(this,
-                    new Exception($"Port [{OtherPort}] not found on node [{ResolvedNode}]."));
+                compilation.AddNode(Path, new MalformedIRNode($"Port [{OtherPort}] not found on target node."));
+                return;
+            }
+
+            var crossRefNode = compilation.AddNode(Path, new LateBindingIRNode(ResolvedNode.Value, OtherPort));
+
+            if (GetPort("qualifier").GetEdges().Count == 0) { 
+                // If the cross ref has no node connected on the 'qualifier' port, then this just passed the value
+                // through. This is a little odd, but we currently allow it for simplicity. If it's causing issues, 
+                // it would be sensible to require the qualifier port on the CrossRefOut node.
+                compilation.MapInputPort(Path, "qualifier", null);
+                compilation.SetPrimaryNode(Path, crossRefNode);
+                compilation.MapOutputPort(Path, "output", crossRefNode);
                 return;
             }
             
-            var referencedNode = otherNodeMapping.OutputPortMap[OtherPort].Node;
-            Assert.IsNotNull(referencedNode);
-
-            compilation.Mappings[this].Nodes[0].AddInput("input", referencedNode);
+            var transform = compilation.AddNode(Path, new QualifierTransformIRNode());
             
             // The 'qualifier' input is provided by the default graph compilation input connection pass.
+            transform.AddInput(QualifierTransformIRNode.PortInput, crossRefNode);
+            
+            compilation.SetPrimaryNode(Path, transform);
+            
+            compilation.MapInputPort(Path, "qualifier", transform, QualifierTransformIRNode.PortQualifier);
+            compilation.MapOutputPort(Path, "output", transform);
+            
         }
     }
 }

@@ -69,7 +69,7 @@ namespace Lattice.StandardLibrary
         {
             return (transform.Position, transform.Rotation, transform.Scale);
         }
-        
+
         /// <summary>
         /// Splits the RigidTransform into its fields.
         /// </summary>
@@ -112,12 +112,13 @@ namespace Lattice.StandardLibrary
             return !value;
         }
     }
-    
+
     /// <summary>
     /// General math nodes.
     /// </summary>
     [LatticeNodes("Lattice/Math")]
-    public static class Math {
+    public static class Math
+    {
         /// <summary>
         /// Scales a 2D value by a number.
         /// </summary>
@@ -125,7 +126,7 @@ namespace Lattice.StandardLibrary
         {
             return factor * input;
         }
-        
+
         /// <summary>
         /// Stores a 2D position value, which can be updated each frame by an input velocity.
         /// </summary>
@@ -134,10 +135,30 @@ namespace Lattice.StandardLibrary
             state += velocity;
             return state;
         }
-        
+
         public static float3 ToFloat3(float2 input)
         {
             return new float3(input.x, input.y, 0);
+        }
+        
+        public static float IntToFloat(int input)
+        {
+            return input;
+        }
+        
+        public static float Divide(float value, float divisor)
+        {
+            return value / divisor;
+        }
+
+        public static float4 ColorToFloat4(Color color)
+        {
+            return new float4(color.r, color.g, color.b, color.a);
+        }
+
+        public static Color Float4ToColor(float4 color)
+        {
+            return new Color(color.x, color.y, color.z, color.w);
         }
     }
 
@@ -192,6 +213,7 @@ namespace Lattice.StandardLibrary
     public static class Input
     {
         /// <summary>Returns a 2D vector pointing in the direction of the current wasd input. ie. (1, 0)</summary>
+        [MainThread]
         public static float2 WasdInput()
         {
             var w = UnityEngine.Input.GetKey(KeyCode.W);
@@ -214,6 +236,7 @@ namespace Lattice.StandardLibrary
         /// </summary>
         /// <param name="code"></param>
         /// <returns></returns>
+        [MainThread]
         public static bool KeyIsDown([Prop] KeyCode code)
         {
             return UnityEngine.Input.GetKey(code);

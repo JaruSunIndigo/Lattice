@@ -17,12 +17,11 @@ namespace Lattice.StandardLibrary
         /// </summary>
         protected abstract T? BakeData(IBaker baker, LatticeExecutorAuthoring authoring);
 
-        public override void CompileToIR(GraphCompilation compilation)
+        public override void CompileToIR(IRGraph compilation)
         {
-            IRNode node = compilation.AddNode(this,
+            IRNode node = compilation.AddNode(Path,
                 FunctionIRNode.FromStaticMethod<BakeDataLatticeNode<T, TTypeOwner>>(nameof(GetBakedData)));
             node.AddInput("entity", compilation.GetImplicitEntity(Graph));
-            compilation.SetPrimaryNode(this, node);
         }
 
         private static T GetBakedData(LatticeNode node, EntityManager em, Entity entity)

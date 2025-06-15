@@ -28,7 +28,7 @@ namespace Lattice.Editor.Views
     }
 
     /// <summary>A VisualElement to render a port on a node.</summary>
-    public sealed partial class PortView : Port, IHasGraphTooltip
+    public sealed partial class PortView : Port
     {
         public const string UssClassName = "port";
         public const string NullableUssClassName = UssClassName + "--is-nullable";
@@ -196,14 +196,15 @@ namespace Lattice.Editor.Views
                 return;
             }
 
-            if (Owner!.NodeTarget is LatticeNode lnode)
+            if (Owner is LatticeNodeView n)
             {
-                if (!compilation.Mappings.ContainsKey(lnode))
+                if (!compilation.Graph.ContainsCodePath(n.Target))
                 {
-                    Debug.LogWarning($"Couldn't update port type. Node was not present in compilation? [{lnode}]");
+                    Debug.LogWarning($"Couldn't update port type. Node was not present in compilation? [{n.Target}]");
                     return;
                 }
-                if (compilation.Mappings[lnode].OutputPortMap.TryGetValue(PortData.identifier, out IRNodeRef irNode))
+                
+                if (compilation.Graph.GetOutputMap(n.Target).TryGetValue(PortData.identifier, out IRNodeRef irNode))
                 {
                     Type outputType = compilation.CompileNode(irNode.Node).OutputType;
 
@@ -418,30 +419,6 @@ namespace Lattice.Editor.Views
             portTag.RemoveFromHierarchy();
             portTag = null;
             EnableInClassList(ConnectedUssClassName, ConnectedVisually);
-        }
-
-        /// <inheritdoc />
-        GraphTooltipView IHasGraphTooltip.CreateTooltipView()
-        {
-            var tooltipView = new PortTooltipView(this);
-            // Add a USS class based on the port location.
-            tooltipView.AddToClassList($"{GraphTooltipView.UssClassName}--{Location.ToString().ToLowerInvariant()}");
-            return tooltipView;
-        }
-
-        /// <inheritdoc />
-        void IHasGraphTooltip.PositionTooltip(GraphTooltipView tooltipElement)
-        {
-            GraphTooltipView.Position position = Location switch
-            {
-                PortViewLocation.Top => GraphTooltipView.Position.Top,
-                PortViewLocation.Bottom or PortViewLocation.BottomLeft => GraphTooltipView.Position.Bottom,
-                PortViewLocation.Left or PortViewLocation.State => GraphTooltipView.Position.Left,
-                PortViewLocation.Right => GraphTooltipView.Position.Right,
-                _ => throw new ArgumentOutOfRangeException()
-            };
-            // Position the tooltip based on the port location.
-            tooltipElement.SetPosition(this, position);
         }
 
         /// <summary>Manipulator that selects connected edges on click.</summary>

@@ -8,6 +8,7 @@ using System.Reflection.Emit;
 using GrEmit;
 using Lattice.Editor.Views;
 using Lattice.IR;
+using Lattice.Utils;
 using Unity.Entities;
 using UnityEditor;
 using Debug = UnityEngine.Debug;
@@ -30,19 +31,24 @@ namespace Lattice.Editor.Tools
             }
 
             Stopwatch timer = Stopwatch.StartNew();
+            int nodes;
             try
             {
-                GraphCompiler.CompileStandalone(graphs);
+                var compilation = GraphCompiler.CompileStandalone(graphs, new GraphCompiler.Settings ()
+                {
+                    Debug = false
+                });
+                nodes = compilation.Graph.Nodes.Count;
             }
             catch (Exception)
             {
-                Debug.LogError("ICE: Graph compilation threw fatal error.");
+                Debug.LogError("ICE: Graph compilation threw fatal error:");
                 throw;
             }
             timer.Stop();
 
             Debug.Log(
-                $"(Lattice) Compiled all lattice graphs in project. ({timer.ElapsedMilliseconds}ms) [{graphs.Count} graphs]:\n" +
+                $"(Lattice) Compiled all lattice graphs in project. ({timer.ElapsedMilliseconds}ms) [{graphs.Count} graphs] [{nodes} nodes]:\n" +
                 string.Join("\n", graphs));
         }
 
@@ -58,12 +64,15 @@ namespace Lattice.Editor.Tools
                 graphs.Add(graph);
             }
 
-            var compilation = GraphCompiler.CompileStandalone(graphs);
+            var compilation = GraphCompiler.CompileStandalone(graphs, settings: new GraphCompiler.Settings ()
+            {
+                Debug = false
+            } );
             string dotString = GraphCompilation.ToDot(compilation);
 
             var p = FileUtil.GetUniqueTempPathInProject() + ".dot";
             File.WriteAllText(p, dotString);
-            LatticeGraphToolbar.OpenGraphviz(dotString);
+            GraphUtils.OpenGraphviz(dotString);
         }
 
         [MenuItem("Lattice/Tools/Save Debug Assembly")]
@@ -76,28 +85,33 @@ namespace Lattice.Editor.Tools
                 graphs.Add(AssetDatabase.LoadAssetAtPath<LatticeGraph>(AssetDatabase.GUIDToAssetPath(path)));
             }
 
-            var graph = GraphCompiler.CompileStandalone(graphs, AssemblyBuilderAccess.RunAndSave);
+            var graph = GraphCompiler.CompileStandalone(graphs, new GraphCompiler.Settings() {
+                Debug = true,
+                AssemblyAccess = AssemblyBuilderAccess.RunAndSave
+            });
+            
+            // Generate work units first.
+            graph.GenerateWorkUnits();
 
             TypeBuilder typeBuilder = graph.CodeGenModule.DefineType("LatticeStaticFunctions",
                 TypeAttributes.Public | TypeAttributes.Class | TypeAttributes.Sealed | TypeAttributes.Abstract);
 
-            foreach (var phase in graph.GetAllPhases())
+            foreach (var workUnit in graph.WorkUnitsTopological)
             {
-                MethodBuilder method = typeBuilder.DefineMethod("LatticePhase_" + phase.Name,
+                MethodBuilder method = typeBuilder.DefineMethod("LatticeWorkUnit_" + workUnit.Name,
                     MethodAttributes.Public | MethodAttributes.Static, CallingConventions.Any, typeof(void),
                     new[] { typeof(IRExecution), typeof(EntityManager) });
 
                 GroboIL emit = new(method);
 
-                HashSet<IRNode> nodesInPhase = graph.GetNodesInPhase(phase).ToHashSet();
-                if (!ILGeneration.EmitNodeExecutionIL(emit, graph, nodesInPhase))
+                if (!ILGeneration.EmitNodeExecutionIL(emit, graph, workUnit.Nodes))
                 {
                     Debug.LogError("Cannot save assembly. IL generation failed.");
                     return;
                 }
 
                 Debug.Log(
-                    $"(Lattice) Compiled phase: [{phase.Name}] [{nodesInPhase.Count} nodes]:\n{string.Join("\n", nodesInPhase)}");
+                    $"(Lattice) Compiled work unit: [{workUnit.Name}] [{workUnit.Nodes.Count} nodes]:\n{string.Join("\n", workUnit.Nodes)}");
                 Debug.Log(emit);
             }
 
@@ -112,21 +126,19 @@ namespace Lattice.Editor.Tools
         }
 
         /// <summary>If true, nodes will execute faster, but their values will not be visible in the Lattice Window.</summary>
-        private static bool disableDebug;
-        public const string DisableDebugMenu = "Lattice/Options/Disable Debug";
+        public const string EnableDebugMenu = "Lattice/Options/Enable Debug";
 
-        [MenuItem(DisableDebugMenu)]
+        [MenuItem(EnableDebugMenu)]
         private static void PerformAction()
         {
-            disableDebug = !disableDebug;
-            EditorPrefs.SetBool("LATTICE_DISABLE_DEBUG", !disableDebug);
+            EditorPrefs.SetBool("LATTICE_ENABLE_DEBUG", !EditorPrefs.GetBool("LATTICE_ENABLE_DEBUG"));
         }
 
-        [MenuItem(DisableDebugMenu, true)]
+        [MenuItem(EnableDebugMenu, true)]
         private static bool PerformActionValidation()
         {
-            var isChecked = EditorPrefs.GetBool("LATTICE_DISABLE_DEBUG", true);
-            Menu.SetChecked(DisableDebugMenu, isChecked);
+            var isChecked = EditorPrefs.GetBool("LATTICE_ENABLE_DEBUG", false);
+            Menu.SetChecked(EnableDebugMenu, isChecked);
             return true;
         }
     }

@@ -5,6 +5,7 @@ using Lattice.Base;
 using Lattice.IR;
 using Unity.Assertions;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Entities;
 using Unity.Profiling;
 using UnityEngine;
@@ -50,28 +51,11 @@ namespace Lattice
         public HashSet<Type> RunPhasesThisFrame = new();
 
         public long UpdateCount; // Used for tests.
-        
-        // Configurations for the compiler used during this session. Null to use the default values pulled from prefs.
-        public bool? EnableDebug;
-
-        private bool InDebug()
-        {
-            if (EnableDebug.HasValue)
-            {
-                return EnableDebug.Value;
-            }
-            
-#if UNITY_EDITOR
-            return !EditorPrefs.GetBool("LATTICE_DISABLE_DEBUG", true);
-#else
-            return false;
-#endif
-        }
 
         protected override void OnCreate()
         {
-            SharedContext = new IRExecution(GraphCompiler.RecompileIfNeeded(), InDebug());
-            GraphCompiler.OnGraphCompilation += OnRecompile;
+            SharedContext = new IRExecution(GlobalGraph.Runtime.RecompileIfNeeded());
+            GlobalGraph.Runtime.OnGraphCompilation += OnRecompile;
             ExecutionHistory.Add(SharedContext);
 
             var globalState = EntityManager.CreateSingleton<LatticeGlobalState>();
@@ -81,7 +65,7 @@ namespace Lattice
         /// <summary>Update the executor with the latest graph if we've recompiled.</summary>
         private void OnRecompile(GraphCompilation globalGraph)
         {
-            SharedContext = new IRExecution(globalGraph, InDebug());
+            SharedContext = new IRExecution(globalGraph);
             ExecutionHistory.Add(SharedContext);
         }
 
@@ -102,30 +86,31 @@ namespace Lattice
                 // Add missing graphs to compilation.
                 foreach (var g in graphsInCompilation)
                 {
-                    if (!GraphCompiler.GlobalGraph.SourceGraphs.Contains(g))
+                    if (!GlobalGraph.Runtime.Graph.TopLevelGraphs.Contains(g))
                     {
-                        GraphCompiler.AddToCompilation(g);
+                        GlobalGraph.Runtime.AddToCompilation(g);
                     }
                 }
             }
 
             // Recompile Lattice graphs, if necessary.
             // Update the graph in place. State remains on the entities.
-            var compilation = GraphCompiler.RecompileIfNeeded();
-            if (compilation != SharedContext.Graph)
+            var compilation = GlobalGraph.Runtime.RecompileIfNeeded();
+
+            if (compilation != SharedContext.Compilation)
             {
-                SharedContext = new IRExecution(compilation, InDebug());
+                SharedContext = new IRExecution(compilation);
                 ExecutionHistory.Add(SharedContext);
             }
 
-            if (SharedContext.Graph.CannotBeExecuted)
+            if (SharedContext.Compilation.CannotBeExecuted)
             {
                 Debug.LogWarning("Lattice graph had fatal compilation errors, and could not be executed.");
                 return;
             }
 
             // Clear per-frame debugging information.
-            bool debug = InDebug();
+            bool debug = GlobalGraph.Runtime.InDebug();
 
             if (SharedContext.DebugData != null)
             {
@@ -153,13 +138,18 @@ namespace Lattice
             SharedContext.EntitiesByQualifier.Clear();
             SharedContext.EntityToLatticeIndex.Clear();
             SharedContext.StateDict.Clear();
-            foreach (LatticeGraph graph in SharedContext.Graph.SourceGraphs)
+            SharedContext.WorkUnitHandles.Clear();
+            foreach (LatticeGraph graph in SharedContext.Compilation.TopLevelGraphs)
             {
-                EntityIRNode entityNode = SharedContext.Graph.GetImplicitEntity(graph);
-                Qualifier qualifier = entityNode.QualifierId;
+                Qualifier? qualifier = SharedContext.Compilation.GetQualifier(graph);
 
-                SharedContext.EntitiesByQualifier[qualifier] = new NativeList<Entity>(128, Allocator.Temp);
-                SharedContext.EntityToLatticeIndex[qualifier] = new NativeHashMap<Entity, int>(128, Allocator.Temp);
+                // Inject it into your NativeList
+                if (qualifier.HasValue)
+                {
+                    SharedContext.EntitiesByQualifier[qualifier.Value] = new UnsafeList<Entity>(128, Allocator.Temp);
+                    SharedContext.EntityToLatticeIndex[qualifier.Value] =
+                        new UnsafeHashMap<Entity, int>(128, Allocator.Temp);
+                }
             }
 
             // Add global state to the execution inputs.
@@ -171,18 +161,24 @@ namespace Lattice
             {
                 foreach (var g in executor.Graphs)
                 {
-                    Qualifier graphQualifier = SharedContext.Graph.GetImplicitEntity(g).QualifierId;
+                    Qualifier? graphQualifier = SharedContext.Compilation.GetQualifier(g);
 
-                    NativeList<Entity> entityList = SharedContext.EntitiesByQualifier[graphQualifier];
-                    entityList.Add(entity);
-
-                    SharedContext.EntityToLatticeIndex[graphQualifier].Add(entity, entityList.Length - 1);
-
-                    // Pull the state for this entity into our state dictionary.
-                    if (EntityManager.HasComponent<LatticeState>(entity))
+                    if (graphQualifier is { } qualifier)
                     {
-                        LatticeState state = EntityManager.GetComponentObject<LatticeState>(entity);
-                        SharedContext.StateDict[entity] = state;
+                        UnsafeList<Entity> entityList = SharedContext.EntitiesByQualifier[qualifier];
+                        entityList.Add(entity);
+                        SharedContext.EntitiesByQualifier[qualifier] = entityList;
+
+                        UnsafeHashMap<Entity, int> entToIdx = SharedContext.EntityToLatticeIndex[qualifier];
+                        entToIdx.Add(entity, entityList.Length - 1);
+                        SharedContext.EntityToLatticeIndex[qualifier] = entToIdx;
+
+                        // Pull the state for this entity into our state dictionary.
+                        if (EntityManager.HasComponent<LatticeState>(entity))
+                        {
+                            LatticeState state = EntityManager.GetComponentObject<LatticeState>(entity);
+                            SharedContext.StateDict[entity] = state;
+                        }
                     }
                 }
             }
@@ -195,7 +191,7 @@ namespace Lattice
 
         protected override void OnDestroy()
         {
-            GraphCompiler.OnGraphCompilation -= OnRecompile;
+            GlobalGraph.Runtime.OnGraphCompilation -= OnRecompile;
         }
     }
 
@@ -224,7 +220,7 @@ namespace Lattice
                 return;
             }
 
-            if (lattice.SharedContext.Graph.CannotBeExecuted)
+            if (lattice.SharedContext.Compilation.CannotBeExecuted)
             {
                 return;
             }
@@ -271,22 +267,29 @@ namespace Lattice
                 return;
             }
 
-            Assert.IsTrue(lattice.CurrentlyExecuting || lattice.SharedContext.Graph.CannotBeExecuted);
+            Assert.IsTrue(lattice.CurrentlyExecuting || lattice.SharedContext.Compilation.CannotBeExecuted);
             lattice.CurrentlyExecuting = false; // Mark that the frame has ended.
 
-            if (lattice.SharedContext.Graph.CannotBeExecuted)
+            if (lattice.SharedContext.Compilation.CannotBeExecuted)
             {
                 return;
+            }
+
+            // Finish all jobs.
+            foreach (var handle in lattice.SharedContext.WorkUnitHandles.Values)
+            {
+                handle.Complete();
             }
 
             // Cleanup scratch values used during graph execution.
             lattice.SharedContext.ClearScratch();
 
             // Sanity check. Verify entities are not destroyed during the lattice phase systems.
-            foreach (NativeList<Entity> entities in lattice.SharedContext.EntitiesByQualifier.Values)
+            foreach (UnsafeList<Entity> entities in lattice.SharedContext.EntitiesByQualifier.Values)
             {
-                foreach (var e in entities)
+                for (int i = 0; i < entities.Length; i++)
                 {
+                    Entity e = entities[i];
                     if (!EntityManager.Exists(e) || !EntityManager.HasComponent<LatticeExecutor>(e))
                     {
                         Debug.LogError(
@@ -301,12 +304,12 @@ namespace Lattice
             // is all correct. This could be made a lot faster, though.
             if (lattice.SharedContext.DebugData != null)
             {
-                GraphCompilation graph = lattice.SharedContext.Graph;
-                foreach (IRNode n in graph.Nodes)
+                GraphCompilation graph = lattice.SharedContext.Compilation;
+                foreach (IRNode n in graph.Graph.Nodes)
                 {
                     Qualifier? q = graph.CompileNode(n).Qualifier;
                     bool shouldHaveRun = !q.HasValue || lattice.SharedContext.EntitiesByQualifier[q.Value].Length > 0;
-                    if (shouldHaveRun && !lattice.SharedContext.DebugData.NodesRunThisFrame.Contains(n))
+                    if (shouldHaveRun && !lattice.SharedContext.DebugData.NodesRunThisFrame.ContainsKey(n))
                     {
                         Debug.LogError($"ICE: Node did not run. [{n}]");
                     }
