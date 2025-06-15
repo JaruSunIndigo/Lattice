@@ -2,7 +2,7 @@
 Lattice is a visual gameplay programming system for Unity's ECS. It aims to be:
  - **Productive**: Lattice aims to minimize the time from design to implementation.
  - **Flexible**: Nodes are written with simple C# functions.
- - **Performant**: Lattice is compiled directly to .NET IL. 
+ - **Performant**: Lattice is compiled directly to .NET IL. Scripts execute with a high degree of parallel execution.
 
 ## Status
 Lattice is in **preview** and currently being used for Pontoco's upcoming projects. As improvement are made, new versions will be published to this public repository.
@@ -18,7 +18,7 @@ Add this git repository in the Unity Package Manager.
 
 Optionally, enable debugging with the Menu Item: Lattice -> Options -> Disable Debugging.
 
-Use the `[LatticeNode]` (on static functions) and `[LatticeNodes]` (on static classes) attributes to expose new nodes to Lattice.
+Use the `[LatticeNode]` (on static functions) and `[LatticeNodes]` (on static classes) attributes to expose new nodes to Lattice. The `[MainThread]` attribute can be used to force a node to execute on the main thread, otherwise they will be scheduled onto the job threads by default.
 
 For more information, watch the [Overview Video](https://www.youtube.com/watch?v=W_PapQ_o2Pw).
 
